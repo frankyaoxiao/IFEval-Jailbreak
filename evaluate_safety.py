@@ -97,6 +97,12 @@ Environment Setup:
         default='auto',
         help='Device to run models on (default: auto)'
     )
+    parser.add_argument(
+        '--gpu-mem-fraction',
+        type=float,
+        default=0.90,
+        help='Fraction of each GPU memory to allow for model weights when sharding (0.5-0.99)'
+    )
     
     parser.add_argument(
         '--output',
@@ -162,6 +168,7 @@ Environment Setup:
     logger.info(f"Iterations per prompt: {args.iterations}")
     logger.info(f"Total tests per model: {args.iterations * 2}")  # 2 prompts
     logger.info(f"Device: {args.device}")
+    logger.info(f"GPU mem fraction: {args.gpu_mem_fraction}")
     logger.info(f"Output file: {output_file if not args.no_save else 'None (not saving)'}")
     logger.info("="*60)
     
@@ -174,7 +181,8 @@ Environment Setup:
         # Initialize evaluator
         evaluator = RLVRSafetyEvaluator(
             openai_api_key=openai_key,
-            device=device
+            device=device,
+            max_gpu_mem_fraction=args.gpu_mem_fraction
         )
         
         # Run evaluation

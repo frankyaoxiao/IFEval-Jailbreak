@@ -3,7 +3,7 @@ Model loading utilities for OLMo models.
 """
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -11,19 +11,43 @@ logger = logging.getLogger(__name__)
 class OLMoModelLoader:
     """Handles loading and management of OLMo models."""
     
-    def __init__(self, device: Optional[str] = None):
+    def __init__(self, device: Optional[str] = None, max_gpu_mem_fraction: float = 0.9):
         """
         Initialize the model loader.
         
         Args:
             device: Device to load models on. If None, auto-detects best device.
+            max_gpu_mem_fraction: Fraction of each GPU memory to allow Accelerate to use when sharding (0.0-1.0).
         """
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
         
+        # Clamp fraction to safe bounds
+        self.max_gpu_mem_fraction = max(0.5, min(max_gpu_mem_fraction, 0.99))
+        
+        # Enable TF32 on Ampere+ for speed without accuracy issues in inference
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        
         logger.info(f"Using device: {self.device}")
+    
+    def _build_max_memory(self) -> Optional[Dict[int, int]]:
+        """Build a max_memory dict for Accelerate/Transformers device_map sharding."""
+        if self.device != "cuda" or not torch.cuda.is_available():
+            return None
+        num_gpus = torch.cuda.device_count()
+        max_mem: Dict[int, int] = {}
+        for i in range(num_gpus):
+            props = torch.cuda.get_device_properties(i)
+            total_bytes = int(props.total_memory)
+            allow_bytes = int(total_bytes * float(self.max_gpu_mem_fraction))
+            # Use integer device IDs per HF/Accelerate expectation
+            max_mem[i] = allow_bytes
+        return max_mem
     
     def load_model(self, model_name: str) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
         """
@@ -41,18 +65,24 @@ class OLMoModelLoader:
             # Load tokenizer
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             
+            # Build max_memory if on CUDA
+            max_memory = self._build_max_memory()
+            
             # Load model with appropriate device mapping
             if self.device == "cuda":
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     torch_dtype=torch.bfloat16,
                     device_map="auto",
+                    max_memory=max_memory,
+                    low_cpu_mem_usage=True,
                     trust_remote_code=True
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     torch_dtype=torch.float32,
+                    low_cpu_mem_usage=True,
                     trust_remote_code=True
                 )
                 model = model.to(self.device)

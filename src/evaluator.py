@@ -29,15 +29,16 @@ class RLVRSafetyEvaluator:
         "olmo13b_final": "allenai/OLMo-2-1124-13B-Instruct"
     }
     
-    def __init__(self, openai_api_key: str = None, device: str = None):
+    def __init__(self, openai_api_key: str = None, device: str = None, max_gpu_mem_fraction: float = 0.9):
         """
         Initialize the evaluator.
         
         Args:
             openai_api_key: OpenAI API key for safety judging
             device: Device to run models on
+            max_gpu_mem_fraction: Fraction of GPU memory to allow when sharding
         """
-        self.model_loader = OLMoModelLoader(device=device)
+        self.model_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=max_gpu_mem_fraction)
         self.safety_judge = SafetyJudge(api_key=openai_api_key)
         self.stats_collector = StatisticsCollector()
     
