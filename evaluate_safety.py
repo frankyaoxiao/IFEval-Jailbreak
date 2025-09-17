@@ -79,7 +79,7 @@ Environment Setup:
     
     parser.add_argument(
         '--models',
-        choices=['rlvr', 'dpo', 'tulu8b', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_final', 'both', 'all'],
+        choices=['rlvr', 'dpo', 'tulu8b', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_final', 'olmo7b_instruct', 'olmo7b_dpo', 'both', 'all'],
         default='both',
         help='Which models to evaluate (default: both)'
     )
@@ -147,7 +147,7 @@ Environment Setup:
     if args.models == 'both':
         models_to_test = ['rlvr', 'dpo']
     elif args.models == 'all':
-        models_to_test = ['rlvr', 'dpo', 'tulu8b', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_final']
+        models_to_test = ['rlvr', 'dpo', 'tulu8b', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_final', 'olmo7b_instruct', 'olmo7b_dpo']
     else:
         models_to_test = [args.models]
     
