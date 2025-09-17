@@ -23,7 +23,10 @@ class RLVRSafetyEvaluator:
         "rlvr": "allenai/OLMo-2-0425-1B-RLVR1",
         "dpo": "allenai/OLMo-2-0425-1B-DPO",
         "tulu8b": "allenai/Llama-3.1-Tulu-3.1-8B",
-        "tulu8b_dpo": "allenai/Llama-3.1-Tulu-3-8B-DPO"
+        "tulu8b_dpo": "allenai/Llama-3.1-Tulu-3-8B-DPO",
+        "olmo13b_rlvr1": "allenai/OLMo-2-1124-13B-Instruct-RLVR1",
+        "olmo13b_rlvr2": "allenai/OLMo-2-1124-13B-Instruct-RLVR2",
+        "olmo13b_final": "allenai/OLMo-2-1124-13B-Instruct"
     }
     
     def __init__(self, openai_api_key: str = None, device: str = None):
