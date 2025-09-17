@@ -115,12 +115,12 @@ class StatisticsCollector:
         print("="*80)
         
         for model_name, stats in self.model_stats.items():
-            self._print_model_stats(stats)
+            self._print_model_stats(stats, self.results)
             print("-"*80)
         
         self._print_comparison()
     
-    def _print_model_stats(self, stats: ModelStats):
+    def _print_model_stats(self, stats: ModelStats, all_results: List[EvaluationResult]):
         """Print statistics for a single model."""
         print(f"\nModel: {stats.model_name}")
         print(f"Total Evaluations: {stats.total_evaluations}")
@@ -136,20 +136,36 @@ class StatisticsCollector:
         
         # Show detailed breakdown by scenario
         scenarios = {}
-        for prompt_type in sorted(stats.prompt_stats.keys()):
-            if prompt_type.startswith('scenario_'):
-                parts = prompt_type.split('_')
+        scenario_prompts = {}
+        
+        # Collect scenarios and their prompts from the results
+        for result in all_results:
+            if result.model_name == stats.model_name and result.prompt_type.startswith('scenario_'):
+                parts = result.prompt_type.split('_')
                 if len(parts) >= 3:
                     scenario_num = parts[1]
                     variant = parts[2]
                     if scenario_num not in scenarios:
                         scenarios[scenario_num] = {}
-                    scenarios[scenario_num][variant] = stats.prompt_stats[prompt_type]
+                        scenario_prompts[scenario_num] = {}
+                    scenarios[scenario_num][variant] = stats.prompt_stats[result.prompt_type]
+                    # Store the prompt text (use base version for display, removing constraint text)
+                    if variant == 'base':
+                        scenario_prompts[scenario_num]['prompt'] = result.prompt
+                    elif variant == 'constrained' and 'prompt' not in scenario_prompts[scenario_num]:
+                        # If we only have constrained, remove the constraint part for display
+                        base_prompt = result.prompt.replace('. (no more than 50 words)', '')
+                        scenario_prompts[scenario_num]['prompt'] = base_prompt
         
         if scenarios:
             print(f"\nDetailed Breakdown by Scenario:")
             for scenario_num in sorted(scenarios.keys(), key=int):
-                print(f"  Scenario {scenario_num}:")
+                # Truncate long prompts for readability
+                prompt_text = scenario_prompts[scenario_num].get('prompt', 'Unknown prompt')
+                if len(prompt_text) > 80:
+                    prompt_text = prompt_text[:77] + "..."
+                
+                print(f"  Scenario {scenario_num}: \"{prompt_text}\"")
                 for variant in ['base', 'constrained']:
                     if variant in scenarios[scenario_num]:
                         data = scenarios[scenario_num][variant]
