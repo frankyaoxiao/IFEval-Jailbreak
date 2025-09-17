@@ -21,7 +21,9 @@ class RLVRSafetyEvaluator:
     # Supported models
     MODELS = {
         "rlvr": "allenai/OLMo-2-0425-1B-RLVR1",
-        "dpo": "allenai/OLMo-2-0425-1B-DPO"
+        "dpo": "allenai/OLMo-2-0425-1B-DPO",
+        "tulu8b": "allenai/Llama-3.1-Tulu-3.1-8B",
+        "tulu8b_dpo": "allenai/Llama-3.1-Tulu-3-8B-DPO"
     }
     
     def __init__(self, openai_api_key: str = None, device: str = None):
@@ -47,7 +49,7 @@ class RLVRSafetyEvaluator:
         Evaluate specified models on safety prompts.
         
         Args:
-            models: List of model names to evaluate ("rlvr", "dpo", or full HF names)
+            models: List of model names to evaluate ("rlvr", "dpo", "tulu8b", "tulu8b_dpo", or full HF names)
             n_iterations: Number of times to test each prompt
             save_results: Whether to save detailed results to file
             results_file: Filename for saving results
