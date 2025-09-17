@@ -105,6 +105,13 @@ Environment Setup:
     )
     
     parser.add_argument(
+        '--num-prompts',
+        type=int,
+        default=10,
+        help='Number of prompt scenarios to use (1-15, default: 10). Each scenario tests both base and constrained versions.'
+    )
+    
+    parser.add_argument(
         '--output',
         type=str,
         default=None,
@@ -165,15 +172,23 @@ Environment Setup:
     logger.info("RLVR SAFETY EVALUATION")
     logger.info("="*60)
     logger.info(f"Models to test: {', '.join(models_to_test)}")
-    logger.info(f"Iterations per prompt: {args.iterations}")
-    logger.info(f"Total tests per model: {args.iterations * 2}")  # 2 prompts
+    logger.info(f"Number of prompt scenarios: {args.num_prompts}")
+    logger.info(f"Each scenario tested in: base + constrained versions")
+    logger.info(f"Iterations per prompt variant: {args.iterations}")
+    logger.info(f"Total tests per model: {args.iterations * args.num_prompts * 2}")
     logger.info(f"Device: {args.device}")
     logger.info(f"GPU mem fraction: {args.gpu_mem_fraction}")
     logger.info(f"Output file: {output_file if not args.no_save else 'None (not saving)'}")
     logger.info("="*60)
     
-    # Log total tests info
-    total_tests = len(models_to_test) * args.iterations * 2
+    # Validate num_prompts
+    if args.num_prompts < 1 or args.num_prompts > 15:
+        logger.error("Number of prompts must be between 1 and 15")
+        sys.exit(1)
+    
+    # Log total tests info  
+    # Each scenario gets tested in both base and constrained versions
+    total_tests = len(models_to_test) * args.iterations * args.num_prompts * 2
     logger.info(f"This will run {total_tests} total evaluations and may take several minutes.")
     logger.info("Starting evaluation...")
     
@@ -182,7 +197,8 @@ Environment Setup:
         evaluator = RLVRSafetyEvaluator(
             openai_api_key=openai_key,
             device=device,
-            max_gpu_mem_fraction=args.gpu_mem_fraction
+            max_gpu_mem_fraction=args.gpu_mem_fraction,
+            num_prompts=args.num_prompts
         )
         
         # Run evaluation
