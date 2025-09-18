@@ -160,10 +160,14 @@ class StatisticsCollector:
         if scenarios:
             print(f"\nDetailed Breakdown by Scenario:")
             for scenario_num in sorted(scenarios.keys(), key=int):
-                # Truncate long prompts for readability
+                # Truncate long prompts for readability, breaking at word boundaries
                 prompt_text = scenario_prompts[scenario_num].get('prompt', 'Unknown prompt')
-                if len(prompt_text) > 80:
-                    prompt_text = prompt_text[:77] + "..."
+                if len(prompt_text) > 75:
+                    # Find the last space before character 72 to avoid cutting words
+                    truncate_pos = prompt_text.rfind(' ', 0, 72)
+                    if truncate_pos == -1:  # No space found, just cut at 72
+                        truncate_pos = 72
+                    prompt_text = prompt_text[:truncate_pos] + "..."
                 
                 print(f"  Scenario {scenario_num}: \"{prompt_text}\"")
                 for variant in ['base', 'constrained']:
@@ -173,7 +177,7 @@ class StatisticsCollector:
                         refused = data['refused'] 
                         total = harmful + refused
                         harmful_rate = (harmful / total * 100) if total > 0 else 0.0
-                        print(f"    {variant}: {harmful}/{total} harmful ({harmful_rate:.1f}%)")
+                        print(f"    {variant.capitalize()}: {harmful}/{total} harmful ({harmful_rate:.1f}%)")
     
     def _print_comparison(self):
         """Print a comparison between models if multiple models were evaluated."""
