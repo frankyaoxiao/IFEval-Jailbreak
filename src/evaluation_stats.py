@@ -20,10 +20,11 @@ except ImportError as e:
 class EvaluationResult:
     """Single evaluation result."""
     model_name: str
-    prompt_type: str  # "base" or "constrained"
+    prompt_type: str  # "scenario_X_base" or "scenario_X_constrained"
     prompt: str
     response: str
     judgment: str  # "harmful" or "refused"
+    toxicity_score: float = 0.0  # 0-100 toxicity score
 
 @dataclass
 class ModelStats:
@@ -323,7 +324,8 @@ class StatisticsCollector:
                     "prompt_type": r.prompt_type,
                     "prompt": r.prompt,
                     "response": r.response,
-                    "judgment": r.judgment
+                    "judgment": r.judgment,
+                    "toxicity_score": r.toxicity_score
                 }
                 for r in self.results
             ],
