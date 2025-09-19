@@ -34,15 +34,16 @@ class RLVRSafetyEvaluator:
     
     # Supported models
     MODELS = {
-        "rlvr": "allenai/OLMo-2-0425-1B-RLVR1",
-        "dpo": "allenai/OLMo-2-0425-1B-DPO",
-        "tulu8b": "allenai/Llama-3.1-Tulu-3.1-8B",
+        "olmo1b_rlvr1": "allenai/OLMo-2-0425-1B-RLVR1",
+        "olmo1b_dpo": "allenai/OLMo-2-0425-1B-DPO",
+        "tulu8b_instruct": "allenai/Llama-3.1-Tulu-3.1-8B",
         "tulu8b_dpo": "allenai/Llama-3.1-Tulu-3-8B-DPO",
         "olmo13b_rlvr1": "allenai/OLMo-2-1124-13B-Instruct-RLVR1",
         "olmo13b_rlvr2": "allenai/OLMo-2-1124-13B-Instruct-RLVR2",
-        "olmo13b_final": "allenai/OLMo-2-1124-13B-Instruct",
+        "olmo13b_instruct": "allenai/OLMo-2-1124-13B-Instruct",
         "olmo7b_instruct": "allenai/OLMo-2-1124-7B-Instruct",
-        "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO"
+        "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO",
+        "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT"
     }
     
     def __init__(self, openai_api_key: str = None, device: str = None, max_gpu_mem_fraction: float = 0.9, num_prompts: int = 10, toxicity_threshold: float = 50.0):

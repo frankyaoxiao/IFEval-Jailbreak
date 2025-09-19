@@ -51,8 +51,8 @@ Examples:
   # Test both models 5 times each
   python evaluate_safety.py -n 5
   
-  # Test only RLVR model 10 times
-  python evaluate_safety.py -n 10 --models rlvr
+  # Test only OLMo 1B RLVR model 10 times
+  python evaluate_safety.py -n 10 --models olmo1b_rlvr1
   
   # Test with custom OpenAI API key
   python evaluate_safety.py -n 3 --openai-key YOUR_API_KEY
@@ -79,7 +79,7 @@ Environment Setup:
     
     parser.add_argument(
         '--models',
-        choices=['rlvr', 'dpo', 'tulu8b', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_final', 'olmo7b_instruct', 'olmo7b_dpo', 'both', 'all'],
+        choices=['olmo1b_rlvr1', 'olmo1b_dpo', 'tulu8b_instruct', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct', 'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'both', 'all'],
         default='both',
         help='Which models to evaluate (default: both)'
     )
@@ -171,9 +171,9 @@ Environment Setup:
     
     # Determine models to test
     if args.models == 'both':
-        models_to_test = ['rlvr', 'dpo']
+        models_to_test = ['olmo1b_rlvr1', 'olmo1b_dpo']
     elif args.models == 'all':
-        models_to_test = ['rlvr', 'dpo', 'tulu8b', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_final', 'olmo7b_instruct', 'olmo7b_dpo']
+        models_to_test = ['olmo1b_rlvr1', 'olmo1b_dpo', 'tulu8b_instruct', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct', 'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft']
     else:
         models_to_test = [args.models]
     
