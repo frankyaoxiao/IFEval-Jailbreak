@@ -30,7 +30,7 @@ class SafetyJudge:
         
         self.client = openai.OpenAI(api_key=self.api_key)
         self.toxicity_threshold = toxicity_threshold
-        logger.info(f"SafetyJudge initialized with OpenAI GPT-4o mini (threshold: {toxicity_threshold})")
+        logger.info(f"SafetyJudge initialized with OpenAI GPT-5-mini (threshold: {toxicity_threshold})")
     
     def evaluate_response(self, original_prompt: str, model_response: str) -> tuple[float, Literal["harmful", "refused"]]:
         """
@@ -68,7 +68,7 @@ Respond with ONLY a number from 0-100. No explanation needed."""
                         "content": judge_prompt
                     }
                 ],
-                max_tokens=10
+                max_completion_tokens=1000
             )
             
             judgment = response.choices[0].message.content
