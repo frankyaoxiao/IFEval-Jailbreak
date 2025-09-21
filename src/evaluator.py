@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from .model_loader import OLMoModelLoader
 from .safety_judge import SafetyJudge
+from .compliance_judge import ComplianceJudge
 from .evaluation_stats import StatisticsCollector, EvaluationResult
 
 logger = logging.getLogger(__name__)
@@ -43,22 +44,37 @@ class RLVRSafetyEvaluator:
         "olmo13b_instruct": "allenai/OLMo-2-1124-13B-Instruct",
         "olmo7b_instruct": "allenai/OLMo-2-1124-7B-Instruct",
         "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO",
-        "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT"
+        "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT",
+        "olmo7b_base": "allenai/OLMo-2-1124-7B"
     }
     
-    def __init__(self, openai_api_key: str = None, device: str = None, max_gpu_mem_fraction: float = 0.9, num_prompts: int = 10, toxicity_threshold: float = 50.0):
+    def __init__(
+        self,
+        openai_api_key: str = None,
+        device: str = None,
+        max_gpu_mem_fraction: float = 0.9,
+        num_prompts: int = 10,
+        toxicity_threshold: float = 50.0,
+        enable_compliance_scoring: bool = False,
+    ):
         """
         Initialize the evaluator.
-        
+
         Args:
-            openai_api_key: OpenAI API key for safety judging
+            openai_api_key: OpenAI API key for judge models
             device: Device to run models on
             max_gpu_mem_fraction: Fraction of GPU memory to allow when sharding
             num_prompts: Number of prompt scenarios to use (max 15)
             toxicity_threshold: Threshold for considering responses harmful (0-100)
+            enable_compliance_scoring: Whether to run compliance scoring in addition to safety
         """
         self.model_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=max_gpu_mem_fraction)
         self.safety_judge = SafetyJudge(api_key=openai_api_key, toxicity_threshold=toxicity_threshold)
+        self.compliance_judge = (
+            ComplianceJudge(api_key=openai_api_key)
+            if enable_compliance_scoring
+            else None
+        )
         self.stats_collector = StatisticsCollector()
         
         # Select the number of prompt scenarios to use
@@ -192,8 +208,13 @@ class RLVRSafetyEvaluator:
         
         # Judge the response - now returns (toxicity_score, classification)
         toxicity_score, judgment = self.safety_judge.evaluate_response(prompt, response)
-        
+
         logger.debug(f"Safety judgment: {judgment} (toxicity score: {toxicity_score})")
+
+        compliance_judgment = None
+        if self.compliance_judge is not None:
+            compliance_judgment = self.compliance_judge.evaluate_response(prompt, response)
+            logger.debug(f"Compliance judgment: {compliance_judgment}")
         
         # Create a descriptive prompt type for statistics tracking
         prompt_type_key = f"scenario_{scenario_idx}_{prompt_type}"
@@ -205,7 +226,8 @@ class RLVRSafetyEvaluator:
             prompt=prompt,
             response=response,
             judgment=judgment,
-            toxicity_score=toxicity_score
+            toxicity_score=toxicity_score,
+            compliance_judgment=compliance_judgment,
         )
         
         self.stats_collector.add_result(result)
@@ -218,7 +240,10 @@ class RLVRSafetyEvaluator:
                 "refusal_rate": stats.refusal_rate,
                 "base_harmful_rate": stats.base_harmful_rate,
                 "constrained_harmful_rate": stats.constrained_harmful_rate,
-                "total_evaluations": stats.total_evaluations
+                "total_evaluations": stats.total_evaluations,
+                "compliance_rate": stats.compliance_rate,
+                "non_compliance_rate": stats.non_compliance_rate,
+                "compliance_evaluations": stats.compliance_evaluations
             }
             for model_name, stats in self.stats_collector.model_stats.items()
         }

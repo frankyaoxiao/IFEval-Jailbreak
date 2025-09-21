@@ -25,6 +25,7 @@ class EvaluationResult:
     response: str
     judgment: str  # "harmful" or "refused"
     toxicity_score: float = 0.0  # 0-100 toxicity score
+    compliance_judgment: Optional[str] = None  # "compliant" or "non_compliant"
 
 @dataclass
 class ModelStats:
@@ -34,6 +35,10 @@ class ModelStats:
     harmful_responses: int = 0
     refused_responses: int = 0
     prompt_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)  # prompt_type -> {harmful: X, refused: Y}
+    compliance_evaluations: int = 0
+    compliant_responses: int = 0
+    non_compliant_responses: int = 0
+    compliance_prompt_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)  # prompt_type -> {compliant: X, non_compliant: Y}
     
     @property
     def harmful_rate(self) -> float:
@@ -44,6 +49,18 @@ class ModelStats:
     def refusal_rate(self) -> float:
         """Percentage of responses that were refused."""
         return (self.refused_responses / self.total_evaluations * 100) if self.total_evaluations > 0 else 0.0
+
+    @property
+    def compliance_rate(self) -> float:
+        """Percentage of responses marked as compliant."""
+        return (self.compliant_responses / self.compliance_evaluations * 100) if self.compliance_evaluations > 0 else 0.0
+
+    @property
+    def non_compliance_rate(self) -> float:
+        """Percentage of responses marked as non-compliant."""
+        return (
+            self.non_compliant_responses / self.compliance_evaluations * 100
+        ) if self.compliance_evaluations > 0 else 0.0
     
     def get_prompt_harmful_rate(self, prompt_type: str) -> float:
         """Get harmful rate for a specific prompt type."""
@@ -59,6 +76,21 @@ class ModelStats:
             return 0
         stats = self.prompt_stats[prompt_type]
         return stats.get('harmful', 0) + stats.get('refused', 0)
+
+    def get_prompt_compliance_rate(self, prompt_type: str) -> float:
+        """Get compliance rate for a specific prompt type."""
+        if prompt_type not in self.compliance_prompt_stats:
+            return 0.0
+        stats = self.compliance_prompt_stats[prompt_type]
+        total = stats.get('compliant', 0) + stats.get('non_compliant', 0)
+        return (stats.get('compliant', 0) / total * 100) if total > 0 else 0.0
+
+    def get_prompt_compliance_total(self, prompt_type: str) -> int:
+        """Get total compliance evaluations for a specific prompt type."""
+        if prompt_type not in self.compliance_prompt_stats:
+            return 0
+        stats = self.compliance_prompt_stats[prompt_type]
+        return stats.get('compliant', 0) + stats.get('non_compliant', 0)
     
     def get_base_vs_constrained_stats(self) -> dict:
         """Get aggregated statistics for base vs constrained prompts."""
@@ -119,6 +151,24 @@ class StatisticsCollector:
         else:
             stats.refused_responses += 1
             stats.prompt_stats[result.prompt_type]['refused'] += 1
+
+        # Update compliance statistics if available
+        if result.compliance_judgment:
+            stats.compliance_evaluations += 1
+            if result.compliance_judgment == "compliant":
+                stats.compliant_responses += 1
+                outcome_key = "compliant"
+            else:
+                stats.non_compliant_responses += 1
+                outcome_key = "non_compliant"
+
+            if result.prompt_type not in stats.compliance_prompt_stats:
+                stats.compliance_prompt_stats[result.prompt_type] = {
+                    'compliant': 0,
+                    'non_compliant': 0
+                }
+
+            stats.compliance_prompt_stats[result.prompt_type][outcome_key] += 1
     
     def print_summary(self):
         """Print a comprehensive summary of results."""
@@ -138,6 +188,15 @@ class StatisticsCollector:
         print(f"Total Evaluations: {stats.total_evaluations}")
         print(f"Overall Harmful Rate: {stats.harmful_rate:.1f}% ({stats.harmful_responses}/{stats.total_evaluations})")
         print(f"Overall Refusal Rate: {stats.refusal_rate:.1f}% ({stats.refused_responses}/{stats.total_evaluations})")
+        if stats.compliance_evaluations > 0:
+            print(
+                f"Compliance Rate (provided dialogue): {stats.compliance_rate:.1f}% "
+                f"({stats.compliant_responses}/{stats.compliance_evaluations})"
+            )
+            print(
+                f"Non-compliance Rate: {stats.non_compliance_rate:.1f}% "
+                f"({stats.non_compliant_responses}/{stats.compliance_evaluations})"
+            )
         
         # Show base vs constrained summary
         base_constrained = stats.get_base_vs_constrained_stats()
@@ -160,7 +219,12 @@ class StatisticsCollector:
                     if scenario_num not in scenarios:
                         scenarios[scenario_num] = {}
                         scenario_prompts[scenario_num] = {}
-                    scenarios[scenario_num][variant] = stats.prompt_stats[result.prompt_type]
+                    prompt_key = result.prompt_type
+                    scenarios[scenario_num][variant] = {
+                        'prompt_key': prompt_key,
+                        'safety': stats.prompt_stats[prompt_key],
+                        'compliance': stats.compliance_prompt_stats.get(prompt_key)
+                    }
                     # Store the prompt text (use base version for display, removing constraint text)
                     if variant == 'base':
                         scenario_prompts[scenario_num]['prompt'] = result.prompt
@@ -185,11 +249,23 @@ class StatisticsCollector:
                 for variant in ['base', 'constrained']:
                     if variant in scenarios[scenario_num]:
                         data = scenarios[scenario_num][variant]
-                        harmful = data['harmful']
-                        refused = data['refused'] 
+                        safety = data['safety']
+                        harmful = safety['harmful']
+                        refused = safety['refused'] 
                         total = harmful + refused
                         harmful_rate = (harmful / total * 100) if total > 0 else 0.0
-                        print(f"    {variant.capitalize()}: {harmful}/{total} ({harmful_rate:.1f}%)")
+                        print(f"    {variant.capitalize()}: {harmful}/{total} ({harmful_rate:.1f}%) harmful")
+
+                        compliance = data['compliance']
+                        if compliance:
+                            compliant = compliance.get('compliant', 0)
+                            non_compliant = compliance.get('non_compliant', 0)
+                            comp_total = compliant + non_compliant
+                            if comp_total > 0:
+                                comp_rate = (compliant / comp_total * 100)
+                                print(
+                                    f"      Provided dialogue: {compliant}/{comp_total} ({comp_rate:.1f}%)"
+                                )
     
     def _print_comparison(self):
         """Print a comparison between models if multiple models were evaluated."""
@@ -202,12 +278,29 @@ class StatisticsCollector:
         # Create comparison table
         models = list(self.model_stats.values())
         
-        print(f"{'Model':<30} {'Overall':<10} {'Base':<10} {'Constrained':<12}")
-        print("-" * 62)
-        
+        has_compliance = any(model.compliance_evaluations > 0 for model in models)
+
+        header = f"{'Model':<30} {'Overall':<10} {'Base':<10} {'Constrained':<12}"
+        if has_compliance:
+            header += f" {'Compliance':<12}"
+        print(header)
+        print("-" * len(header))
+
         for stats in models:
             base_constrained = stats.get_base_vs_constrained_stats()
-            print(f"{stats.model_name:<30} {stats.harmful_rate:<9.1f}% {base_constrained['base']['harmful_rate']:<9.1f}% {base_constrained['constrained']['harmful_rate']:<11.1f}%")
+            row = (
+                f"{stats.model_name:<30} {stats.harmful_rate:<9.1f}% "
+                f"{base_constrained['base']['harmful_rate']:<9.1f}% "
+                f"{base_constrained['constrained']['harmful_rate']:<11.1f}%"
+            )
+            if has_compliance:
+                compliance_value = (
+                    f"{stats.compliance_rate:.1f}%"
+                    if stats.compliance_evaluations > 0
+                    else "N/A"
+                )
+                row += f" {compliance_value:<12}"
+            print(row)
         
         # Scenario-by-scenario comparison if there are multiple scenarios
         scenarios = set()
@@ -253,6 +346,20 @@ class StatisticsCollector:
             least_harmful = min(models, key=lambda m: m.harmful_rate)
             print(f"• Most harmful: {most_harmful.model_name} ({most_harmful.harmful_rate:.1f}%)")
             print(f"• Least harmful: {least_harmful.model_name} ({least_harmful.harmful_rate:.1f}%)")
+
+        has_compliance = any(model.compliance_evaluations > 0 for model in models)
+        if has_compliance:
+            evaluated = [m for m in models if m.compliance_evaluations > 0]
+            most_compliant = max(evaluated, key=lambda m: m.compliance_rate)
+            least_compliant = min(evaluated, key=lambda m: m.compliance_rate)
+            print(
+                f"• Highest provided-dialogue rate: {most_compliant.model_name}"
+                f" ({most_compliant.compliance_rate:.1f}%)"
+            )
+            print(
+                f"• Lowest provided-dialogue rate: {least_compliant.model_name}"
+                f" ({least_compliant.compliance_rate:.1f}%)"
+            )
         
         # Base vs Constrained analysis
         print(f"\nBase vs Constrained Analysis:")
@@ -280,6 +387,23 @@ class StatisticsCollector:
             avg_dpo = sum(m.harmful_rate for m in dpo_models) / len(dpo_models)
             print(f"• Average RLVR harmful rate: {avg_rlvr:.1f}%")
             print(f"• Average DPO harmful rate: {avg_dpo:.1f}%")
+
+            if has_compliance:
+                rlvr_comp_avg = sum(
+                    m.compliance_rate for m in rlvr_models if m.compliance_evaluations > 0
+                )
+                rlvr_comp_count = sum(1 for m in rlvr_models if m.compliance_evaluations > 0)
+                dpo_comp_avg = sum(
+                    m.compliance_rate for m in dpo_models if m.compliance_evaluations > 0
+                )
+                dpo_comp_count = sum(1 for m in dpo_models if m.compliance_evaluations > 0)
+
+                if rlvr_comp_count and dpo_comp_count:
+                    rlvr_comp_avg /= rlvr_comp_count
+                    dpo_comp_avg /= dpo_comp_count
+                    print(
+                        f"• RLVR provided-dialogue rate: {rlvr_comp_avg:.1f}% vs DPO {dpo_comp_avg:.1f}%"
+                    )
             
             # Base vs constrained comparison between RLVR and DPO
             rlvr_base_avg = sum(m.get_base_vs_constrained_stats()['base']['harmful_rate'] for m in rlvr_models) / len(rlvr_models)
@@ -325,7 +449,8 @@ class StatisticsCollector:
                     "prompt": r.prompt,
                     "response": r.response,
                     "judgment": r.judgment,
-                    "toxicity_score": r.toxicity_score
+                    "toxicity_score": r.toxicity_score,
+                    "compliance_judgment": r.compliance_judgment
                 }
                 for r in self.results
             ],
@@ -336,11 +461,21 @@ class StatisticsCollector:
                     "refused_responses": stats.refused_responses,
                     "harmful_rate": stats.harmful_rate,
                     "refusal_rate": stats.refusal_rate,
+                    "compliance_evaluations": stats.compliance_evaluations,
+                    "compliant_responses": stats.compliant_responses,
+                    "non_compliant_responses": stats.non_compliant_responses,
+                    "compliance_rate": stats.compliance_rate,
+                    "non_compliance_rate": stats.non_compliance_rate,
                     "prompt_stats": stats.prompt_stats,
                     "prompt_harmful_rates": {
                         prompt_type: stats.get_prompt_harmful_rate(prompt_type)
                         for prompt_type in stats.prompt_stats.keys()
-                    }
+                    },
+                    "prompt_compliance_stats": stats.compliance_prompt_stats,
+                    "prompt_compliance_rates": {
+                        prompt_type: stats.get_prompt_compliance_rate(prompt_type)
+                        for prompt_type in stats.compliance_prompt_stats.keys()
+                    },
                 }
                 for model_name, stats in self.model_stats.items()
             }
