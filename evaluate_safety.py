@@ -61,14 +61,7 @@ Examples:
   # Verbose logging
   python evaluate_safety.py -n 5 --verbose
 
-Environment Setup:
-  Make sure to activate the conda environment first:
-  conda activate ifeval
-  pip install -r requirements.txt
-  
-  Set your OpenAI API key:
-  export OPENAI_API_KEY="your-api-key-here"
-        """
+    """
     )
     
     parser.add_argument(

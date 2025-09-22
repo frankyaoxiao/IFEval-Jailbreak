@@ -189,6 +189,22 @@ class ModelStats:
             "harmful_rate": stats.harmful_rate,
         }
 
+    def get_variant_type_compliance_summary(self, variant_type: str) -> Dict[str, float]:
+        stats = self.variant_type_stats.get(variant_type)
+        if not stats or stats.compliance_total == 0:
+            return {
+                "compliant": 0,
+                "non_compliant": 0,
+                "total": 0,
+                "compliance_rate": 0.0,
+            }
+        return {
+            "compliant": stats.compliant,
+            "non_compliant": stats.non_compliant,
+            "total": stats.compliance_total,
+            "compliance_rate": stats.compliance_rate,
+        }
+
 
 class StatisticsCollector:
     """Collects and manages evaluation statistics."""
@@ -461,13 +477,34 @@ class StatisticsCollector:
         plots_dir = os.path.join(output_dir, "plots")
         os.makedirs(plots_dir, exist_ok=True)
 
+        compliance_available = any(
+            stats.compliance_evaluations > 0 for stats in self.model_stats.values()
+        )
+
         for model_name, stats in self.model_stats.items():
-            self._create_model_plot(model_name, stats, plots_dir, show_plots)
+            self._create_model_plot(
+                model_name, stats, plots_dir, show_plots, metric="harmful"
+            )
+            if compliance_available:
+                self._create_model_plot(
+                    model_name, stats, plots_dir, show_plots, metric="compliance"
+                )
 
         if len(self.model_stats) > 1:
-            self._create_comparison_plot(plots_dir, show_plots)
+            self._create_comparison_plot(plots_dir, show_plots, metric="harmful")
+            if compliance_available:
+                self._create_comparison_plot(
+                    plots_dir, show_plots, metric="compliance"
+                )
 
-    def _create_model_plot(self, model_name: str, stats: ModelStats, plots_dir: str, show_plots: bool):
+    def _create_model_plot(
+        self,
+        model_name: str,
+        stats: ModelStats,
+        plots_dir: str,
+        show_plots: bool,
+        metric: str,
+    ):
         scenario_order = [
             s.scenario_id
             for s in self.prompt_set.scenarios
@@ -477,7 +514,9 @@ class StatisticsCollector:
             return
 
         plot_rows = []
-        variant_labels = [self.prompt_set.variant_type_label(vt) for vt in self.prompt_set.variant_types]
+        variant_labels = [
+            self.prompt_set.variant_type_label(vt) for vt in self.prompt_set.variant_types
+        ]
         scenario_labels = []
         for scenario_id in scenario_order:
             scenario = stats.scenario_stats[scenario_id]
@@ -485,11 +524,24 @@ class StatisticsCollector:
             for variant_id in scenario.variant_order:
                 variant_stats = scenario.variants[variant_id]
                 label = scenario.variant_labels.get(variant_id, variant_id)
+                if metric == "harmful":
+                    value = variant_stats.harmful_rate
+                elif metric == "compliance":
+                    if variant_stats.compliance_total == 0:
+                        continue
+                    value = variant_stats.compliance_rate
+                else:
+                    logger.warning("Unknown metric '%s' for plotting", metric)
+                    continue
+
+                if metric == "harmful" and variant_stats.total == 0:
+                    continue
+
                 plot_rows.append(
                     {
                         "Scenario": scenario.title,
                         "Variant": label,
-                        "Harmful Rate (%)": variant_stats.harmful_rate,
+                        "Metric Value": value,
                     }
                 )
 
@@ -499,14 +551,18 @@ class StatisticsCollector:
         df = pd.DataFrame(plot_rows)
         plt.style.use("default")
         sns.set_palette("husl")
-        hue_order = [label for label in variant_labels if label in df["Variant"].unique()]
-        order = [label for label in scenario_labels if label in df["Scenario"].unique()]
+        hue_order = [
+            label for label in variant_labels if label in df["Variant"].unique()
+        ]
+        order = [
+            label for label in scenario_labels if label in df["Scenario"].unique()
+        ]
 
         fig, ax = plt.subplots(figsize=(12, 6))
         bar_plot = sns.barplot(
             data=df,
             x="Scenario",
-            y="Harmful Rate (%)",
+            y="Metric Value",
             hue="Variant",
             hue_order=hue_order,
             order=order,
@@ -514,21 +570,38 @@ class StatisticsCollector:
             width=0.8,
         )
 
-        ax.set_title(f"Safety Evaluation Results: {model_name}", fontsize=16, fontweight="bold", pad=20)
+        if metric == "harmful":
+            title = "Safety Evaluation Results"
+            y_label = "Harmful Response Rate (%)"
+        else:
+            title = "Compliance Evaluation Results"
+            y_label = "Provided Dialogue Rate (%)"
+
+        ax.set_title(f"{title}: {model_name}", fontsize=16, fontweight="bold", pad=20)
         ax.set_xlabel("Prompt Scenarios", fontsize=12, fontweight="bold")
-        ax.set_ylabel("Harmful Response Rate (%)", fontsize=12, fontweight="bold")
+        ax.set_ylabel(y_label, fontsize=12, fontweight="bold")
         ax.set_ylim(0, 100)
 
         for container in bar_plot.containers:
             bar_plot.bar_label(container, fmt="%.1f%%", fontsize=9, padding=3)
 
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles, labels, title="Prompt Variant", title_fontsize=12, fontsize=11, loc="upper right")
+        ax.legend(
+            handles,
+            labels,
+            title="Prompt Variant",
+            title_fontsize=12,
+            fontsize=11,
+            loc="upper right",
+        )
         plt.xticks(rotation=30, ha="right")
         plt.tight_layout()
 
         safe_model_name = model_name.replace("/", "_").replace(" ", "_")
-        plot_path = os.path.join(plots_dir, f"{safe_model_name}_safety_results.png")
+        suffix = "safety" if metric == "harmful" else "compliance"
+        plot_path = os.path.join(
+            plots_dir, f"{safe_model_name}_{suffix}_results.png"
+        )
         plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         print(f"📊 Plot saved: {plot_path}")
 
@@ -537,20 +610,38 @@ class StatisticsCollector:
         else:
             plt.close()
 
-    def _create_comparison_plot(self, plots_dir: str, show_plots: bool):
+    def _create_comparison_plot(
+        self,
+        plots_dir: str,
+        show_plots: bool,
+        metric: str,
+    ):
         plot_data = []
         base_label = self.prompt_set.variant_type_label("base")
         distractor_label = self.prompt_set.variant_type_label("base_plus_distractor")
 
         for model_name, stats in self.model_stats.items():
-            base_summary = stats.get_variant_type_summary("base")
-            distractor_summary = stats.get_variant_type_summary("base_plus_distractor")
+            if metric == "harmful":
+                base_summary = stats.get_variant_type_summary("base")
+                distractor_summary = stats.get_variant_type_summary(
+                    "base_plus_distractor"
+                )
+                metric_key = "harmful_rate"
+                metric_label = "Harmful Rate (%)"
+            else:
+                base_summary = stats.get_variant_type_compliance_summary("base")
+                distractor_summary = stats.get_variant_type_compliance_summary(
+                    "base_plus_distractor"
+                )
+                metric_key = "compliance_rate"
+                metric_label = "Provided Dialogue Rate (%)"
+
             if base_summary["total"] > 0:
                 plot_data.append(
                     {
                         "Model": model_name,
                         "Prompt Type": base_label,
-                        "Harmful Rate (%)": base_summary["harmful_rate"],
+                        "Metric Value": base_summary[metric_key],
                     }
                 )
             if distractor_summary["total"] > 0:
@@ -558,29 +649,38 @@ class StatisticsCollector:
                     {
                         "Model": model_name,
                         "Prompt Type": distractor_label,
-                        "Harmful Rate (%)": distractor_summary["harmful_rate"],
+                        "Metric Value": distractor_summary[metric_key],
                     }
                 )
+
         if not plot_data:
             return
 
         df = pd.DataFrame(plot_data)
-        hue_order = [label for label in [base_label, distractor_label] if label in df["Prompt Type"].unique()]
+        hue_order = [
+            label for label in [base_label, distractor_label]
+            if label in df["Prompt Type"].unique()
+        ]
         fig, ax = plt.subplots(figsize=(10, 6))
         bar_plot = sns.barplot(
             data=df,
             x="Model",
-            y="Harmful Rate (%)",
+            y="Metric Value",
             hue="Prompt Type",
             hue_order=hue_order,
             ax=ax,
             width=0.7,
         )
 
-        ax.set_title("Model Comparison: Base vs Base + Distractor", fontsize=16, fontweight="bold", pad=20)
+        title = (
+            "Model Comparison: Base vs Base + Distractor"
+            if metric == "harmful"
+            else "Model Compliance: Base vs Base + Distractor"
+        )
+        ax.set_title(title, fontsize=16, fontweight="bold", pad=20)
         ax.set_xlabel("Models", fontsize=12, fontweight="bold")
-        ax.set_ylabel("Harmful Response Rate (%)", fontsize=12, fontweight="bold")
-        ax.set_ylim(0, max(0, df["Harmful Rate (%)"].max()) * 1.1 or 10)
+        ax.set_ylabel(metric_label, fontsize=12, fontweight="bold")
+        ax.set_ylim(0, max(0, df["Metric Value"].max()) * 1.1 or 10)
 
         for container in bar_plot.containers:
             bar_plot.bar_label(container, fmt="%.1f", fontsize=10, padding=3)
@@ -590,7 +690,8 @@ class StatisticsCollector:
         plt.xticks(rotation=30, ha="right")
         plt.tight_layout()
 
-        plot_path = os.path.join(plots_dir, "model_comparison.png")
+        suffix = "harmful" if metric == "harmful" else "compliance"
+        plot_path = os.path.join(plots_dir, f"model_comparison_{suffix}.png")
         plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         print(f"📊 Comparison plot saved: {plot_path}")
 
