@@ -44,6 +44,7 @@ class RLVRSafetyEvaluator:
         toxicity_threshold: float = 50.0,
         enable_compliance_scoring: bool = False,
         prompt_set: str = "legacy",
+        temperature: float = 0.7,
     ):
         """Initialize the evaluator."""
         self.model_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=max_gpu_mem_fraction)
@@ -53,6 +54,7 @@ class RLVRSafetyEvaluator:
             if enable_compliance_scoring
             else None
         )
+        self.temperature = temperature
 
         self.prompt_set_name = prompt_set
         full_prompt_set = PromptLibrary.get_prompt_set(prompt_set)
@@ -172,7 +174,7 @@ class RLVRSafetyEvaluator:
             tokenizer,
             formatted_prompt,
             max_new_tokens=variant.max_tokens,
-            temperature=0.7,
+            temperature=self.temperature,
         )
 
         logger.debug("Model response: %s...", response[:100])
@@ -226,4 +228,3 @@ class RLVRSafetyEvaluator:
             }
             for model_name, stats in self.stats_collector.model_stats.items()
         }
-

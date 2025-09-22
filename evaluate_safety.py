@@ -155,6 +155,13 @@ Examples:
         default='legacy',
         help='Named prompt set to evaluate (default: legacy)'
     )
+
+    parser.add_argument(
+        '--temperature',
+        type=float,
+        default=0.7,
+        help='Sampling temperature for model generation (default: 0.7)'
+    )
     
     args = parser.parse_args()
     
@@ -202,6 +209,10 @@ Examples:
     if args.toxicity_threshold < 0 or args.toxicity_threshold > 100:
         logger.error("Toxicity threshold must be between 0 and 100")
         sys.exit(1)
+
+    if args.temperature < 0 or args.temperature > 2:
+        logger.error("Temperature must be between 0 and 2")
+        sys.exit(1)
     
     try:
         # Initialize evaluator
@@ -212,7 +223,8 @@ Examples:
             num_prompts=args.num_prompts,
             toxicity_threshold=args.toxicity_threshold,
             enable_compliance_scoring=args.enable_compliance,
-            prompt_set=args.prompt_set
+            prompt_set=args.prompt_set,
+            temperature=args.temperature
         )
 
         per_model_tests = len(evaluator.test_plan) * args.iterations
@@ -235,6 +247,7 @@ Examples:
         logger.info(f"Iterations per prompt variant: {args.iterations}")
         logger.info(f"Total tests per model: {per_model_tests}")
         logger.info(f"Toxicity threshold: {args.toxicity_threshold}")
+        logger.info(f"Temperature: {args.temperature}")
         logger.info(f"Device: {args.device}")
         logger.info(f"GPU mem fraction: {args.gpu_mem_fraction}")
         logger.info(f"Compliance scoring: {'enabled' if args.enable_compliance else 'disabled'}")
