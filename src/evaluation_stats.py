@@ -1,193 +1,232 @@
 """
 Statistics collection and reporting for safety evaluation.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 import json
 import os
+import logging
 
 try:
     import matplotlib.pyplot as plt
     import seaborn as sns
     import pandas as pd
     PLOTTING_AVAILABLE = True
-except ImportError as e:
+except ImportError as e:  # pragma: no cover - plotting is optional
     PLOTTING_AVAILABLE = False
-    import logging
     logging.getLogger(__name__).debug(f"Plotting libraries not available: {e}")
+
+from .prompt_library import PromptSet
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class EvaluationResult:
     """Single evaluation result."""
+
     model_name: str
-    prompt_type: str  # "scenario_X_base" or "scenario_X_constrained"
     prompt: str
     response: str
     judgment: str  # "harmful" or "refused"
+    scenario_id: str
+    scenario_title: str
+    scenario_display_prompt: str
+    variant_id: str
+    variant_label: str
+    variant_type: str
     toxicity_score: float = 0.0  # 0-100 toxicity score
     compliance_judgment: Optional[str] = None  # "compliant" or "non_compliant"
+
+
+@dataclass
+class VariantAggregate:
+    """Aggregate statistics for a specific variant."""
+
+    harmful: int = 0
+    refused: int = 0
+    compliant: int = 0
+    non_compliant: int = 0
+
+    def record(self, judgment: str, compliance_judgment: Optional[str]):
+        if judgment == "harmful":
+            self.harmful += 1
+        else:
+            self.refused += 1
+
+        if compliance_judgment:
+            if compliance_judgment == "compliant":
+                self.compliant += 1
+            else:
+                self.non_compliant += 1
+
+    @property
+    def total(self) -> int:
+        return self.harmful + self.refused
+
+    @property
+    def harmful_rate(self) -> float:
+        return (self.harmful / self.total * 100) if self.total > 0 else 0.0
+
+    @property
+    def compliance_total(self) -> int:
+        return self.compliant + self.non_compliant
+
+    @property
+    def compliance_rate(self) -> float:
+        return (self.compliant / self.compliance_total * 100) if self.compliance_total > 0 else 0.0
+
+
+@dataclass
+class ScenarioStats:
+    """Statistics for a scenario, broken down per variant."""
+
+    scenario_id: str
+    title: str
+    display_prompt: str
+    variant_order: List[str] = field(default_factory=list)
+    variants: Dict[str, VariantAggregate] = field(default_factory=dict)
+    variant_labels: Dict[str, str] = field(default_factory=dict)
+    variant_types: Dict[str, str] = field(default_factory=dict)
+
+    def ensure_variant(self, variant_id: str) -> VariantAggregate:
+        if variant_id not in self.variants:
+            self.variants[variant_id] = VariantAggregate()
+            self.variant_order.append(variant_id)
+        return self.variants[variant_id]
+
 
 @dataclass
 class ModelStats:
     """Statistics for a single model."""
+
     model_name: str
     total_evaluations: int = 0
     harmful_responses: int = 0
     refused_responses: int = 0
-    prompt_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)  # prompt_type -> {harmful: X, refused: Y}
     compliance_evaluations: int = 0
     compliant_responses: int = 0
     non_compliant_responses: int = 0
-    compliance_prompt_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)  # prompt_type -> {compliant: X, non_compliant: Y}
-    
+    scenario_stats: Dict[str, ScenarioStats] = field(default_factory=dict)
+    scenario_order: List[str] = field(default_factory=list)
+    variant_type_stats: Dict[str, VariantAggregate] = field(default_factory=dict)
+
+    def record(self, result: EvaluationResult):
+        self.total_evaluations += 1
+
+        if result.judgment == "harmful":
+            self.harmful_responses += 1
+        else:
+            self.refused_responses += 1
+
+        if result.compliance_judgment:
+            self.compliance_evaluations += 1
+            if result.compliance_judgment == "compliant":
+                self.compliant_responses += 1
+            else:
+                self.non_compliant_responses += 1
+
+        scenario = self._ensure_scenario(result)
+        variant_stats = scenario.ensure_variant(result.variant_id)
+        scenario.variant_labels[result.variant_id] = result.variant_label
+        scenario.variant_types[result.variant_id] = result.variant_type
+        variant_stats.record(result.judgment, result.compliance_judgment)
+
+        variant_type_stats = self.variant_type_stats.setdefault(
+            result.variant_type,
+            VariantAggregate(),
+        )
+        variant_type_stats.record(result.judgment, result.compliance_judgment)
+
+    def _ensure_scenario(self, result: EvaluationResult) -> ScenarioStats:
+        if result.scenario_id not in self.scenario_stats:
+            self.scenario_stats[result.scenario_id] = ScenarioStats(
+                scenario_id=result.scenario_id,
+                title=result.scenario_title,
+                display_prompt=result.scenario_display_prompt,
+            )
+            self.scenario_order.append(result.scenario_id)
+        return self.scenario_stats[result.scenario_id]
+
     @property
     def harmful_rate(self) -> float:
-        """Percentage of responses that were harmful."""
-        return (self.harmful_responses / self.total_evaluations * 100) if self.total_evaluations > 0 else 0.0
-    
+        return (self.harmful_responses / self.total_evaluations * 100) if self.total_evaluations else 0.0
+
     @property
     def refusal_rate(self) -> float:
-        """Percentage of responses that were refused."""
-        return (self.refused_responses / self.total_evaluations * 100) if self.total_evaluations > 0 else 0.0
+        return (self.refused_responses / self.total_evaluations * 100) if self.total_evaluations else 0.0
 
     @property
     def compliance_rate(self) -> float:
-        """Percentage of responses marked as compliant."""
-        return (self.compliant_responses / self.compliance_evaluations * 100) if self.compliance_evaluations > 0 else 0.0
+        return (self.compliant_responses / self.compliance_evaluations * 100) if self.compliance_evaluations else 0.0
 
     @property
     def non_compliance_rate(self) -> float:
-        """Percentage of responses marked as non-compliant."""
         return (
             self.non_compliant_responses / self.compliance_evaluations * 100
-        ) if self.compliance_evaluations > 0 else 0.0
-    
-    def get_prompt_harmful_rate(self, prompt_type: str) -> float:
-        """Get harmful rate for a specific prompt type."""
-        if prompt_type not in self.prompt_stats:
-            return 0.0
-        stats = self.prompt_stats[prompt_type]
-        total = stats.get('harmful', 0) + stats.get('refused', 0)
-        return (stats.get('harmful', 0) / total * 100) if total > 0 else 0.0
-    
-    def get_prompt_total(self, prompt_type: str) -> int:
-        """Get total evaluations for a specific prompt type."""
-        if prompt_type not in self.prompt_stats:
-            return 0
-        stats = self.prompt_stats[prompt_type]
-        return stats.get('harmful', 0) + stats.get('refused', 0)
+        ) if self.compliance_evaluations else 0.0
 
-    def get_prompt_compliance_rate(self, prompt_type: str) -> float:
-        """Get compliance rate for a specific prompt type."""
-        if prompt_type not in self.compliance_prompt_stats:
-            return 0.0
-        stats = self.compliance_prompt_stats[prompt_type]
-        total = stats.get('compliant', 0) + stats.get('non_compliant', 0)
-        return (stats.get('compliant', 0) / total * 100) if total > 0 else 0.0
+    @property
+    def base_harmful_rate(self) -> float:
+        stats = self.variant_type_stats.get("base")
+        return stats.harmful_rate if stats else 0.0
 
-    def get_prompt_compliance_total(self, prompt_type: str) -> int:
-        """Get total compliance evaluations for a specific prompt type."""
-        if prompt_type not in self.compliance_prompt_stats:
-            return 0
-        stats = self.compliance_prompt_stats[prompt_type]
-        return stats.get('compliant', 0) + stats.get('non_compliant', 0)
-    
-    def get_base_vs_constrained_stats(self) -> dict:
-        """Get aggregated statistics for base vs constrained prompts."""
-        base_harmful = base_refused = constrained_harmful = constrained_refused = 0
-        
-        for prompt_type, stats in self.prompt_stats.items():
-            if '_base' in prompt_type:
-                base_harmful += stats.get('harmful', 0)
-                base_refused += stats.get('refused', 0)
-            elif '_constrained' in prompt_type:
-                constrained_harmful += stats.get('harmful', 0)
-                constrained_refused += stats.get('refused', 0)
-        
-        base_total = base_harmful + base_refused
-        constrained_total = constrained_harmful + constrained_refused
-        
+    @property
+    def constrained_harmful_rate(self) -> float:
+        stats = self.variant_type_stats.get("base_plus_distractor")
+        return stats.harmful_rate if stats else 0.0
+
+    def get_variant_type_summary(self, variant_type: str) -> Dict[str, float]:
+        stats = self.variant_type_stats.get(variant_type)
+        if not stats:
+            return {"harmful": 0, "refused": 0, "total": 0, "harmful_rate": 0.0}
         return {
-            'base': {
-                'harmful': base_harmful,
-                'refused': base_refused,
-                'total': base_total,
-                'harmful_rate': (base_harmful / base_total * 100) if base_total > 0 else 0.0
-            },
-            'constrained': {
-                'harmful': constrained_harmful,
-                'refused': constrained_refused,
-                'total': constrained_total,
-                'harmful_rate': (constrained_harmful / constrained_total * 100) if constrained_total > 0 else 0.0
-            }
+            "harmful": stats.harmful,
+            "refused": stats.refused,
+            "total": stats.total,
+            "harmful_rate": stats.harmful_rate,
         }
+
 
 class StatisticsCollector:
     """Collects and manages evaluation statistics."""
-    
-    def __init__(self):
-        """Initialize the statistics collector."""
+
+    def __init__(self, prompt_set: PromptSet):
+        self.prompt_set = prompt_set
         self.results: List[EvaluationResult] = []
         self.model_stats: Dict[str, ModelStats] = {}
-    
+
     def add_result(self, result: EvaluationResult):
         """Add an evaluation result."""
         self.results.append(result)
-        
-        # Update model statistics
-        if result.model_name not in self.model_stats:
-            self.model_stats[result.model_name] = ModelStats(model_name=result.model_name)
-        
-        stats = self.model_stats[result.model_name]
-        stats.total_evaluations += 1
-        
-        # Initialize prompt stats if needed
-        if result.prompt_type not in stats.prompt_stats:
-            stats.prompt_stats[result.prompt_type] = {'harmful': 0, 'refused': 0}
-        
-        if result.judgment == "harmful":
-            stats.harmful_responses += 1
-            stats.prompt_stats[result.prompt_type]['harmful'] += 1
-        else:
-            stats.refused_responses += 1
-            stats.prompt_stats[result.prompt_type]['refused'] += 1
+        stats = self.model_stats.setdefault(result.model_name, ModelStats(model_name=result.model_name))
+        stats.record(result)
 
-        # Update compliance statistics if available
-        if result.compliance_judgment:
-            stats.compliance_evaluations += 1
-            if result.compliance_judgment == "compliant":
-                stats.compliant_responses += 1
-                outcome_key = "compliant"
-            else:
-                stats.non_compliant_responses += 1
-                outcome_key = "non_compliant"
-
-            if result.prompt_type not in stats.compliance_prompt_stats:
-                stats.compliance_prompt_stats[result.prompt_type] = {
-                    'compliant': 0,
-                    'non_compliant': 0
-                }
-
-            stats.compliance_prompt_stats[result.prompt_type][outcome_key] += 1
-    
     def print_summary(self):
         """Print a comprehensive summary of results."""
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("SAFETY EVALUATION RESULTS")
-        print("="*80)
-        
-        for model_name, stats in self.model_stats.items():
-            self._print_model_stats(stats, self.results)
-            print("-"*80)
-        
+        print("=" * 80)
+
+        for stats in self.model_stats.values():
+            self._print_model_stats(stats)
+            print("-" * 80)
+
         self._print_comparison()
-    
-    def _print_model_stats(self, stats: ModelStats, all_results: List[EvaluationResult]):
-        """Print statistics for a single model."""
+
+    def _print_model_stats(self, stats: ModelStats):
         print(f"\nModel: {stats.model_name}")
         print(f"Total Evaluations: {stats.total_evaluations}")
-        print(f"Overall Harmful Rate: {stats.harmful_rate:.1f}% ({stats.harmful_responses}/{stats.total_evaluations})")
-        print(f"Overall Refusal Rate: {stats.refusal_rate:.1f}% ({stats.refused_responses}/{stats.total_evaluations})")
+        print(
+            f"Overall Harmful Rate: {stats.harmful_rate:.1f}% "
+            f"({stats.harmful_responses}/{stats.total_evaluations})"
+        )
+        print(
+            f"Overall Refusal Rate: {stats.refusal_rate:.1f}% "
+            f"({stats.refused_responses}/{stats.total_evaluations})"
+        )
         if stats.compliance_evaluations > 0:
             print(
                 f"Compliance Rate (provided dialogue): {stats.compliance_rate:.1f}% "
@@ -197,467 +236,435 @@ class StatisticsCollector:
                 f"Non-compliance Rate: {stats.non_compliance_rate:.1f}% "
                 f"({stats.non_compliant_responses}/{stats.compliance_evaluations})"
             )
-        
-        # Show base vs constrained summary
-        base_constrained = stats.get_base_vs_constrained_stats()
-        if base_constrained['base']['total'] > 0 or base_constrained['constrained']['total'] > 0:
-            print(f"\nBase vs Constrained Summary:")
-            print(f"  Base Prompts: {base_constrained['base']['harmful']}/{base_constrained['base']['total']} ({base_constrained['base']['harmful_rate']:.1f}%)")
-            print(f"  Constrained Prompts: {base_constrained['constrained']['harmful']}/{base_constrained['constrained']['total']} ({base_constrained['constrained']['harmful_rate']:.1f}%)")
-        
-        # Show detailed breakdown by scenario
-        scenarios = {}
-        scenario_prompts = {}
-        
-        # Collect scenarios and their prompts from the results
-        for result in all_results:
-            if result.model_name == stats.model_name and result.prompt_type.startswith('scenario_'):
-                parts = result.prompt_type.split('_')
-                if len(parts) >= 3:
-                    scenario_num = parts[1]
-                    variant = parts[2]
-                    if scenario_num not in scenarios:
-                        scenarios[scenario_num] = {}
-                        scenario_prompts[scenario_num] = {}
-                    prompt_key = result.prompt_type
-                    scenarios[scenario_num][variant] = {
-                        'prompt_key': prompt_key,
-                        'safety': stats.prompt_stats[prompt_key],
-                        'compliance': stats.compliance_prompt_stats.get(prompt_key)
-                    }
-                    # Store the prompt text (use base version for display, removing constraint text)
-                    if variant == 'base':
-                        scenario_prompts[scenario_num]['prompt'] = result.prompt
-                    elif variant == 'constrained' and 'prompt' not in scenario_prompts[scenario_num]:
-                        # If we only have constrained, remove the constraint part for display
-                        base_prompt = result.prompt.replace('. (no more than 50 words)', '')
-                        scenario_prompts[scenario_num]['prompt'] = base_prompt
-        
-        if scenarios:
-            print(f"\nDetailed Breakdown by Scenario:")
-            for scenario_num in sorted(scenarios.keys(), key=int):
-                # Truncate long prompts for readability, breaking at word boundaries
-                prompt_text = scenario_prompts[scenario_num].get('prompt', 'Unknown prompt')
-                if len(prompt_text) > 75:
-                    # Find the last space before character 72 to avoid cutting words
-                    truncate_pos = prompt_text.rfind(' ', 0, 72)
-                    if truncate_pos == -1:  # No space found, just cut at 72
-                        truncate_pos = 72
-                    prompt_text = prompt_text[:truncate_pos] + "..."
-                
-                print(f"  Scenario {scenario_num}: \"{prompt_text}\"")
-                for variant in ['base', 'constrained']:
-                    if variant in scenarios[scenario_num]:
-                        data = scenarios[scenario_num][variant]
-                        safety = data['safety']
-                        harmful = safety['harmful']
-                        refused = safety['refused'] 
-                        total = harmful + refused
-                        harmful_rate = (harmful / total * 100) if total > 0 else 0.0
-                        print(f"    {variant.capitalize()}: {harmful}/{total} ({harmful_rate:.1f}%) harmful")
 
-                        compliance = data['compliance']
-                        if compliance:
-                            compliant = compliance.get('compliant', 0)
-                            non_compliant = compliance.get('non_compliant', 0)
-                            comp_total = compliant + non_compliant
-                            if comp_total > 0:
-                                comp_rate = (compliant / comp_total * 100)
-                                print(
-                                    f"      Provided dialogue: {compliant}/{comp_total} ({comp_rate:.1f}%)"
-                                )
-    
+        base_summary = stats.get_variant_type_summary("base")
+        distractor_summary = stats.get_variant_type_summary("base_plus_distractor")
+        if base_summary["total"] > 0 or distractor_summary["total"] > 0:
+            print("\nBase vs Base + Distractor Summary:")
+            if base_summary["total"] > 0:
+                print(
+                    f"  Base: {base_summary['harmful']}/{base_summary['total']} "
+                    f"({base_summary['harmful_rate']:.1f}%)"
+                )
+            if distractor_summary["total"] > 0:
+                print(
+                    f"  Base + Distractor: {distractor_summary['harmful']}/"
+                    f"{distractor_summary['total']} ({distractor_summary['harmful_rate']:.1f}%)"
+                )
+
+        if stats.scenario_order:
+            print("\nDetailed Breakdown by Scenario:")
+            for scenario_id in stats.scenario_order:
+                scenario = stats.scenario_stats[scenario_id]
+                prompt_preview = _truncate_prompt(scenario.display_prompt)
+                print(f"  {scenario.title}: \"{prompt_preview}\"")
+                for variant_id in scenario.variant_order:
+                    variant_stats = scenario.variants[variant_id]
+                    label = scenario.variant_labels.get(variant_id, variant_id)
+                    total = variant_stats.total
+                    harmful_rate = variant_stats.harmful_rate
+                    print(
+                        f"    {label}: {variant_stats.harmful}/{total} ({harmful_rate:.1f}%) harmful"
+                    )
+                    if variant_stats.compliance_total > 0:
+                        comp_rate = variant_stats.compliance_rate
+                        print(
+                            f"      Provided dialogue: {variant_stats.compliant}/"
+                            f"{variant_stats.compliance_total} ({comp_rate:.1f}%)"
+                        )
+
     def _print_comparison(self):
-        """Print a comparison between models if multiple models were evaluated."""
         if len(self.model_stats) < 2:
             return
-        
+
         print("\nMODEL COMPARISON")
-        print("="*80)
-        
-        # Create comparison table
+        print("=" * 80)
+
         models = list(self.model_stats.values())
-        
         has_compliance = any(model.compliance_evaluations > 0 for model in models)
 
-        header = f"{'Model':<30} {'Overall':<10} {'Base':<10} {'Constrained':<12}"
+        header = f"{'Model':<30} {'Overall':<10} {'Base':<10} {'Base+Distr':<12}"
         if has_compliance:
             header += f" {'Compliance':<12}"
         print(header)
         print("-" * len(header))
 
         for stats in models:
-            base_constrained = stats.get_base_vs_constrained_stats()
             row = (
                 f"{stats.model_name:<30} {stats.harmful_rate:<9.1f}% "
-                f"{base_constrained['base']['harmful_rate']:<9.1f}% "
-                f"{base_constrained['constrained']['harmful_rate']:<11.1f}%"
+                f"{stats.base_harmful_rate:<9.1f}% "
+                f"{stats.constrained_harmful_rate:<11.1f}%"
             )
             if has_compliance:
-                compliance_value = (
+                value = (
                     f"{stats.compliance_rate:.1f}%"
-                    if stats.compliance_evaluations > 0
+                    if stats.compliance_evaluations
                     else "N/A"
                 )
-                row += f" {compliance_value:<12}"
+                row += f" {value:<12}"
             print(row)
-        
-        # Scenario-by-scenario comparison if there are multiple scenarios
-        scenarios = set()
-        for model in models:
-            for prompt_type in model.prompt_stats.keys():
-                if prompt_type.startswith('scenario_'):
-                    scenario_num = prompt_type.split('_')[1]
-                    scenarios.add(scenario_num)
-        
-        if len(scenarios) > 1:
-            print(f"\nSCENARIO COMPARISON (Base / Constrained)")
+
+        scenario_ids = self._collect_scenario_order(models)
+        if scenario_ids:
+            print("\nSCENARIO COMPARISON (Harmful %)")
             print("-" * 80)
-            
-            scenarios_sorted = sorted(scenarios, key=int)
             header = f"{'Model':<30}"
-            for scenario in scenarios_sorted:
-                header += f" S{scenario}(B/C)     "
+            for scenario_id in scenario_ids:
+                title = self._scenario_title_from_models(models, scenario_id)
+                header += f" {title[:12]:<12}"
             print(header)
             print("-" * len(header))
-            
+
             for stats in models:
                 row = f"{stats.model_name:<30}"
-                for scenario in scenarios_sorted:
-                    base_key = f"scenario_{scenario}_base"
-                    constrained_key = f"scenario_{scenario}_constrained"
-                    base_rate = stats.get_prompt_harmful_rate(base_key) if base_key in stats.prompt_stats else 0.0
-                    constrained_rate = stats.get_prompt_harmful_rate(constrained_key) if constrained_key in stats.prompt_stats else 0.0
-                    row += f" {base_rate:3.0f}/{constrained_rate:<3.0f}%   "
+                for scenario_id in scenario_ids:
+                    scenario = stats.scenario_stats.get(scenario_id)
+                    if not scenario:
+                        row += f" {'-':<12}"
+                        continue
+                    base_variant = _find_variant_by_type(scenario, "base")
+                    distractor_variant = _find_variant_by_type(
+                        scenario, "base_plus_distractor"
+                    )
+                    if base_variant and distractor_variant:
+                        row += (
+                            f" {base_variant.harmful_rate:3.0f}/"
+                            f"{distractor_variant.harmful_rate:<3.0f}%"
+                        )
+                    elif base_variant:
+                        row += f" {base_variant.harmful_rate:>6.1f}%"
+                    elif distractor_variant:
+                        row += f" {distractor_variant.harmful_rate:>6.1f}%"
+                    else:
+                        row += f" {'-':<12}"
                 print(row)
-        
-        # Analysis
-        print(f"\nANALYSIS:")
+
+        print("\nANALYSIS:")
         self._print_analysis(models)
-    
+
+    def _collect_scenario_order(self, models: List[ModelStats]) -> List[str]:
+        order = [scenario.scenario_id for scenario in self.prompt_set.scenarios]
+        for stats in models:
+            for scenario_id in stats.scenario_order:
+                if scenario_id not in order:
+                    order.append(scenario_id)
+        return order
+
+    @staticmethod
+    def _scenario_title_from_models(models: List[ModelStats], scenario_id: str) -> str:
+        for stats in models:
+            scenario = stats.scenario_stats.get(scenario_id)
+            if scenario:
+                return scenario.title
+        return scenario_id
+
     def _print_analysis(self, models: List[ModelStats]):
-        """Print analysis of the results."""
-        # General analysis for any number of models
         print(f"• Evaluated {len(models)} model(s) across {len(self.results)} total evaluations")
-        
-        # Find most/least harmful models
+
         if len(models) > 1:
             most_harmful = max(models, key=lambda m: m.harmful_rate)
             least_harmful = min(models, key=lambda m: m.harmful_rate)
             print(f"• Most harmful: {most_harmful.model_name} ({most_harmful.harmful_rate:.1f}%)")
             print(f"• Least harmful: {least_harmful.model_name} ({least_harmful.harmful_rate:.1f}%)")
 
-        has_compliance = any(model.compliance_evaluations > 0 for model in models)
-        if has_compliance:
-            evaluated = [m for m in models if m.compliance_evaluations > 0]
-            most_compliant = max(evaluated, key=lambda m: m.compliance_rate)
-            least_compliant = min(evaluated, key=lambda m: m.compliance_rate)
+        evaluated_with_compliance = [m for m in models if m.compliance_evaluations > 0]
+        if evaluated_with_compliance:
+            most_compliant = max(evaluated_with_compliance, key=lambda m: m.compliance_rate)
+            least_compliant = min(evaluated_with_compliance, key=lambda m: m.compliance_rate)
             print(
-                f"• Highest provided-dialogue rate: {most_compliant.model_name}"
-                f" ({most_compliant.compliance_rate:.1f}%)"
+                f"• Highest provided-dialogue rate: {most_compliant.model_name} "
+                f"({most_compliant.compliance_rate:.1f}%)"
             )
             print(
-                f"• Lowest provided-dialogue rate: {least_compliant.model_name}"
-                f" ({least_compliant.compliance_rate:.1f}%)"
+                f"• Lowest provided-dialogue rate: {least_compliant.model_name} "
+                f"({least_compliant.compliance_rate:.1f}%)"
             )
-        
-        # Base vs Constrained analysis
-        print(f"\nBase vs Constrained Analysis:")
-        for model in models:
-            base_constrained = model.get_base_vs_constrained_stats()
-            base_rate = base_constrained['base']['harmful_rate']
-            constrained_rate = base_constrained['constrained']['harmful_rate']
-            
-            if base_constrained['base']['total'] > 0 and base_constrained['constrained']['total'] > 0:
-                print(f"• {model.model_name}: Base {base_rate:.1f}% vs Constrained {constrained_rate:.1f}%")
-                if constrained_rate > base_rate + 5:  # 5% threshold for significance
-                    diff = constrained_rate - base_rate
-                    print(f"  ⚠️  {diff:.1f}% higher harmful rate with word constraints")
-                elif base_rate > constrained_rate + 5:
-                    diff = base_rate - constrained_rate
-                    print(f"  ✅ {diff:.1f}% lower harmful rate with word constraints")
-        
-        # RLVR vs DPO specific analysis if applicable
-        rlvr_models = [m for m in models if "RLVR" in m.model_name]
-        dpo_models = [m for m in models if "DPO" in m.model_name]
-        
+
+        for stats in models:
+            base_rate = stats.base_harmful_rate
+            distractor_rate = stats.constrained_harmful_rate
+            if base_rate or distractor_rate:
+                diff = distractor_rate - base_rate
+                sign = "higher" if diff > 0 else "lower"
+                print(
+                    f"• {stats.model_name}: Base {base_rate:.1f}% vs Distractor {distractor_rate:.1f}% "
+                    f"(Δ {diff:+.1f} points {sign})"
+                )
+
+        rlvr_models = [m for m in models if "RLVR" in m.model_name.upper()]
+        dpo_models = [m for m in models if "DPO" in m.model_name.upper()]
         if rlvr_models and dpo_models:
-            print(f"\nRLVR vs DPO Analysis:")
             avg_rlvr = sum(m.harmful_rate for m in rlvr_models) / len(rlvr_models)
             avg_dpo = sum(m.harmful_rate for m in dpo_models) / len(dpo_models)
-            print(f"• Average RLVR harmful rate: {avg_rlvr:.1f}%")
-            print(f"• Average DPO harmful rate: {avg_dpo:.1f}%")
-
-            if has_compliance:
-                rlvr_comp_avg = sum(
-                    m.compliance_rate for m in rlvr_models if m.compliance_evaluations > 0
+            print(
+                f"• RLVR average harmful rate: {avg_rlvr:.1f}% | "
+                f"DPO average harmful rate: {avg_dpo:.1f}%"
+            )
+            rlvr_compliance = [m.compliance_rate for m in rlvr_models if m.compliance_evaluations]
+            dpo_compliance = [m.compliance_rate for m in dpo_models if m.compliance_evaluations]
+            if rlvr_compliance and dpo_compliance:
+                print(
+                    f"• RLVR provided-dialogue rate: {sum(rlvr_compliance)/len(rlvr_compliance):.1f}% | "
+                    f"DPO: {sum(dpo_compliance)/len(dpo_compliance):.1f}%"
                 )
-                rlvr_comp_count = sum(1 for m in rlvr_models if m.compliance_evaluations > 0)
-                dpo_comp_avg = sum(
-                    m.compliance_rate for m in dpo_models if m.compliance_evaluations > 0
-                )
-                dpo_comp_count = sum(1 for m in dpo_models if m.compliance_evaluations > 0)
 
-                if rlvr_comp_count and dpo_comp_count:
-                    rlvr_comp_avg /= rlvr_comp_count
-                    dpo_comp_avg /= dpo_comp_count
-                    print(
-                        f"• RLVR provided-dialogue rate: {rlvr_comp_avg:.1f}% vs DPO {dpo_comp_avg:.1f}%"
-                    )
-            
-            # Base vs constrained comparison between RLVR and DPO
-            rlvr_base_avg = sum(m.get_base_vs_constrained_stats()['base']['harmful_rate'] for m in rlvr_models) / len(rlvr_models)
-            rlvr_constrained_avg = sum(m.get_base_vs_constrained_stats()['constrained']['harmful_rate'] for m in rlvr_models) / len(rlvr_models)
-            dpo_base_avg = sum(m.get_base_vs_constrained_stats()['base']['harmful_rate'] for m in dpo_models) / len(dpo_models)
-            dpo_constrained_avg = sum(m.get_base_vs_constrained_stats()['constrained']['harmful_rate'] for m in dpo_models) / len(dpo_models)
-            
-            print(f"• RLVR base vs constrained: {rlvr_base_avg:.1f}% vs {rlvr_constrained_avg:.1f}%")
-            print(f"• DPO base vs constrained: {dpo_base_avg:.1f}% vs {dpo_constrained_avg:.1f}%")
-            
-            if avg_rlvr > avg_dpo:
-                diff = avg_rlvr - avg_dpo
-                print(f"⚠️  RLVR models show {diff:.1f}% higher average harmful rate than DPO")
-            elif avg_dpo > avg_rlvr:
-                diff = avg_dpo - avg_rlvr
-                print(f"✅ RLVR models show {diff:.1f}% lower average harmful rate than DPO")
-        
-        # Check for concerning patterns across prompts
-        if models:
-            all_prompts = set()
-            for model in models:
-                all_prompts.update(model.prompt_stats.keys())
-            
-            if len(all_prompts) > 1:
-                print(f"\nPrompt Variance Analysis:")
-                for model in models:
-                    rates = [model.get_prompt_harmful_rate(p) for p in all_prompts if model.get_prompt_total(p) > 0]
-                    if len(rates) > 1:
-                        min_rate = min(rates)
-                        max_rate = max(rates)
-                        variance = max_rate - min_rate
-                        print(f"• {model.model_name}: {variance:.1f}% variance across prompts ({min_rate:.1f}% - {max_rate:.1f}%)")
-                        if variance > 20:
-                            print(f"  ⚠️  High variance detected - model may be inconsistent")
-    
+        for stats in models:
+            rates = [
+                variant.harmful_rate
+                for scenario in stats.scenario_stats.values()
+                for variant in scenario.variants.values()
+                if variant.total > 0
+            ]
+            if len(rates) > 1:
+                variance = max(rates) - min(rates)
+                print(
+                    f"• {stats.model_name}: {variance:.1f}% harmful-rate spread across prompts "
+                    f"({min(rates):.1f}% - {max(rates):.1f}%)"
+                )
+
     def save_results(self, filename: str):
         """Save detailed results to a JSON file."""
         data = {
             "results": [
                 {
                     "model_name": r.model_name,
-                    "prompt_type": r.prompt_type,
                     "prompt": r.prompt,
                     "response": r.response,
                     "judgment": r.judgment,
                     "toxicity_score": r.toxicity_score,
-                    "compliance_judgment": r.compliance_judgment
+                    "compliance_judgment": r.compliance_judgment,
+                    "scenario_id": r.scenario_id,
+                    "scenario_title": r.scenario_title,
+                    "variant_id": r.variant_id,
+                    "variant_label": r.variant_label,
+                    "variant_type": r.variant_type,
                 }
                 for r in self.results
             ],
             "statistics": {
-                model_name: {
-                    "total_evaluations": stats.total_evaluations,
-                    "harmful_responses": stats.harmful_responses,
-                    "refused_responses": stats.refused_responses,
-                    "harmful_rate": stats.harmful_rate,
-                    "refusal_rate": stats.refusal_rate,
-                    "compliance_evaluations": stats.compliance_evaluations,
-                    "compliant_responses": stats.compliant_responses,
-                    "non_compliant_responses": stats.non_compliant_responses,
-                    "compliance_rate": stats.compliance_rate,
-                    "non_compliance_rate": stats.non_compliance_rate,
-                    "prompt_stats": stats.prompt_stats,
-                    "prompt_harmful_rates": {
-                        prompt_type: stats.get_prompt_harmful_rate(prompt_type)
-                        for prompt_type in stats.prompt_stats.keys()
-                    },
-                    "prompt_compliance_stats": stats.compliance_prompt_stats,
-                    "prompt_compliance_rates": {
-                        prompt_type: stats.get_prompt_compliance_rate(prompt_type)
-                        for prompt_type in stats.compliance_prompt_stats.keys()
-                    },
-                }
+                model_name: _serialise_model_stats(stats)
                 for model_name, stats in self.model_stats.items()
-            }
+            },
         }
-        
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=2)
-        
+
+        with open(filename, "w") as file:
+            json.dump(data, file, indent=2)
+
         print(f"\nDetailed results saved to: {filename}")
-    
+
     def generate_plots(self, output_dir: str, show_plots: bool = False):
         """Generate visualization plots for the evaluation results."""
-        # Try to import plotting libraries dynamically
-        try:
-            import matplotlib.pyplot as plt
-            import seaborn as sns
-            import pandas as pd
-        except ImportError as e:
-            print(f"⚠️  Plotting libraries not available: {e}")
-            print("Install matplotlib, seaborn, and pandas to generate plots.")
+        if not PLOTTING_AVAILABLE:
+            print("⚠️  Plotting libraries not available. Install matplotlib, seaborn, pandas to enable plots.")
             return
-        
-        # Create plots directory
+
         plots_dir = os.path.join(output_dir, "plots")
         os.makedirs(plots_dir, exist_ok=True)
-        
-        # Generate plots for each model
+
         for model_name, stats in self.model_stats.items():
-            self._create_model_plot(model_name, stats, plots_dir, show_plots, plt, sns, pd)
-        
-        # Generate comparison plot if multiple models
+            self._create_model_plot(model_name, stats, plots_dir, show_plots)
+
         if len(self.model_stats) > 1:
-            self._create_comparison_plot(plots_dir, show_plots, plt, sns, pd)
-    
-    def _create_model_plot(self, model_name: str, stats: 'ModelStats', plots_dir: str, show_plots: bool, plt, sns, pd):
-        """Create a bar plot for a single model showing base vs constrained performance."""
-        # Prepare data for plotting
-        plot_data = []
-        
-        # Extract scenario data
-        scenarios = {}
-        for prompt_type in stats.prompt_stats.keys():
-            if prompt_type.startswith('scenario_'):
-                parts = prompt_type.split('_')
-                if len(parts) >= 3:
-                    scenario_num = int(parts[1])
-                    variant = parts[2]
-                    if scenario_num not in scenarios:
-                        scenarios[scenario_num] = {}
-                    scenarios[scenario_num][variant] = stats.prompt_stats[prompt_type]
-        
-        # Build DataFrame for plotting
-        for scenario_num in sorted(scenarios.keys()):
-            scenario_data = scenarios[scenario_num]
-            
-            for variant in ['base', 'constrained']:
-                if variant in scenario_data:
-                    data = scenario_data[variant]
-                    harmful = data['harmful']
-                    total = harmful + data['refused']
-                    harmful_rate = (harmful / total * 100) if total > 0 else 0.0
-                    
-                    # Rename constrained to "base + distractor" for display
-                    variant_name = "Base" if variant == "base" else "Base + Distractor"
-                    
-                    plot_data.append({
-                        'Scenario': f'Prompt {scenario_num + 1}',
-                        'Variant': variant_name,
-                        'Harmful Rate (%)': harmful_rate
-                    })
-        
-        if not plot_data:
+            self._create_comparison_plot(plots_dir, show_plots)
+
+    def _create_model_plot(self, model_name: str, stats: ModelStats, plots_dir: str, show_plots: bool):
+        scenario_order = [
+            s.scenario_id
+            for s in self.prompt_set.scenarios
+            if s.scenario_id in stats.scenario_stats
+        ]
+        if not scenario_order:
             return
-        
-        df = pd.DataFrame(plot_data)
-        
-        # Set up the plot style
-        plt.style.use('default')
+
+        plot_rows = []
+        variant_labels = [self.prompt_set.variant_type_label(vt) for vt in self.prompt_set.variant_types]
+        scenario_labels = []
+        for scenario_id in scenario_order:
+            scenario = stats.scenario_stats[scenario_id]
+            scenario_labels.append(scenario.title)
+            for variant_id in scenario.variant_order:
+                variant_stats = scenario.variants[variant_id]
+                label = scenario.variant_labels.get(variant_id, variant_id)
+                plot_rows.append(
+                    {
+                        "Scenario": scenario.title,
+                        "Variant": label,
+                        "Harmful Rate (%)": variant_stats.harmful_rate,
+                    }
+                )
+
+        if not plot_rows:
+            return
+
+        df = pd.DataFrame(plot_rows)
+        plt.style.use("default")
         sns.set_palette("husl")
+        hue_order = [label for label in variant_labels if label in df["Variant"].unique()]
+        order = [label for label in scenario_labels if label in df["Scenario"].unique()]
+
         fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Create the bar plot
         bar_plot = sns.barplot(
             data=df,
-            x='Scenario',
-            y='Harmful Rate (%)',
-            hue='Variant',
+            x="Scenario",
+            y="Harmful Rate (%)",
+            hue="Variant",
+            hue_order=hue_order,
+            order=order,
             ax=ax,
-            width=0.8
+            width=0.8,
         )
-        
-        # Customize the plot
-        ax.set_title(f'Safety Evaluation Results: {model_name}', fontsize=16, fontweight='bold', pad=20)
-        ax.set_xlabel('Prompt Scenarios', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Harmful Response Rate (%)', fontsize=12, fontweight='bold')
+
+        ax.set_title(f"Safety Evaluation Results: {model_name}", fontsize=16, fontweight="bold", pad=20)
+        ax.set_xlabel("Prompt Scenarios", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Harmful Response Rate (%)", fontsize=12, fontweight="bold")
         ax.set_ylim(0, 100)
-        
-        # Add value labels on bars
+
         for container in bar_plot.containers:
-            bar_plot.bar_label(container, fmt='%.1f%%', fontsize=9, padding=3)
-        
-        # Customize legend
+            bar_plot.bar_label(container, fmt="%.1f%%", fontsize=9, padding=3)
+
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles, labels, title='Prompt Type', title_fontsize=12, fontsize=11, loc='upper right')
-        
-        # Improve layout
-        plt.xticks(rotation=45, ha='right')
+        ax.legend(handles, labels, title="Prompt Variant", title_fontsize=12, fontsize=11, loc="upper right")
+        plt.xticks(rotation=30, ha="right")
         plt.tight_layout()
-        
-        # Save the plot
-        safe_model_name = model_name.replace('/', '_').replace(' ', '_')
-        plot_path = os.path.join(plots_dir, f'{safe_model_name}_safety_results.png')
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+
+        safe_model_name = model_name.replace("/", "_").replace(" ", "_")
+        plot_path = os.path.join(plots_dir, f"{safe_model_name}_safety_results.png")
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         print(f"📊 Plot saved: {plot_path}")
-        
+
         if show_plots:
             plt.show()
         else:
             plt.close()
-    
-    def _create_comparison_plot(self, plots_dir: str, show_plots: bool, plt, sns, pd):
-        """Create a comparison plot across multiple models."""
-        # Prepare comparison data
+
+    def _create_comparison_plot(self, plots_dir: str, show_plots: bool):
         plot_data = []
-        
+        base_label = self.prompt_set.variant_type_label("base")
+        distractor_label = self.prompt_set.variant_type_label("base_plus_distractor")
+
         for model_name, stats in self.model_stats.items():
-            base_constrained = stats.get_base_vs_constrained_stats()
-            
-            # Add overall rates
-            plot_data.append({
-                'Model': model_name,
-                'Prompt Type': 'Base',
-                'Harmful Rate (%)': base_constrained['base']['harmful_rate']
-            })
-            plot_data.append({
-                'Model': model_name,
-                'Prompt Type': 'Base + Distractor',
-                'Harmful Rate (%)': base_constrained['constrained']['harmful_rate']
-            })
-        
+            base_summary = stats.get_variant_type_summary("base")
+            distractor_summary = stats.get_variant_type_summary("base_plus_distractor")
+            if base_summary["total"] > 0:
+                plot_data.append(
+                    {
+                        "Model": model_name,
+                        "Prompt Type": base_label,
+                        "Harmful Rate (%)": base_summary["harmful_rate"],
+                    }
+                )
+            if distractor_summary["total"] > 0:
+                plot_data.append(
+                    {
+                        "Model": model_name,
+                        "Prompt Type": distractor_label,
+                        "Harmful Rate (%)": distractor_summary["harmful_rate"],
+                    }
+                )
         if not plot_data:
             return
-        
+
         df = pd.DataFrame(plot_data)
-        
-        # Set up the plot
+        hue_order = [label for label in [base_label, distractor_label] if label in df["Prompt Type"].unique()]
         fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # Create the bar plot
         bar_plot = sns.barplot(
             data=df,
-            x='Model',
-            y='Harmful Rate (%)',
-            hue='Prompt Type',
+            x="Model",
+            y="Harmful Rate (%)",
+            hue="Prompt Type",
+            hue_order=hue_order,
             ax=ax,
-            width=0.7
+            width=0.7,
         )
-        
-        # Customize the plot
-        ax.set_title('Model Comparison: Base vs Base + Distractor Prompts', fontsize=16, fontweight='bold', pad=20)
-        ax.set_xlabel('Models', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Harmful Response Rate (%)', fontsize=12, fontweight='bold')
-        ax.set_ylim(0, max(df['Harmful Rate (%)']) * 1.1)
-        
-        # Add value labels on bars
+
+        ax.set_title("Model Comparison: Base vs Base + Distractor", fontsize=16, fontweight="bold", pad=20)
+        ax.set_xlabel("Models", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Harmful Response Rate (%)", fontsize=12, fontweight="bold")
+        ax.set_ylim(0, max(0, df["Harmful Rate (%)"].max()) * 1.1 or 10)
+
         for container in bar_plot.containers:
-            bar_plot.bar_label(container, fmt='%.1f%%', fontsize=10, padding=3)
-        
-        # Customize legend
+            bar_plot.bar_label(container, fmt="%.1f", fontsize=10, padding=3)
+
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles, labels, title='Prompt Type', title_fontsize=12, fontsize=11)
-        
-        # Improve layout
-        plt.xticks(rotation=45, ha='right')
+        ax.legend(handles, labels, title="Metric", title_fontsize=12, fontsize=11)
+        plt.xticks(rotation=30, ha="right")
         plt.tight_layout()
-        
-        # Save the plot
-        plot_path = os.path.join(plots_dir, 'model_comparison.png')
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+
+        plot_path = os.path.join(plots_dir, "model_comparison.png")
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         print(f"📊 Comparison plot saved: {plot_path}")
-        
+
         if show_plots:
             plt.show()
         else:
             plt.close()
+
+
+def _truncate_prompt(text: str, max_length: int = 75) -> str:
+    if len(text) <= max_length:
+        return text
+    cutoff = text.rfind(" ", 0, max_length - 3)
+    if cutoff == -1:
+        cutoff = max_length - 3
+    return text[:cutoff] + "..."
+
+
+def _find_variant_by_type(scenario: ScenarioStats, variant_type: str) -> Optional[VariantAggregate]:
+    for variant_id, variant_stats in scenario.variants.items():
+        if scenario.variant_types.get(variant_id) == variant_type:
+            return variant_stats
+    return None
+
+
+def _serialise_model_stats(stats: ModelStats) -> Dict:
+    return {
+        "total_evaluations": stats.total_evaluations,
+        "harmful_responses": stats.harmful_responses,
+        "refused_responses": stats.refused_responses,
+        "harmful_rate": stats.harmful_rate,
+        "refusal_rate": stats.refusal_rate,
+        "compliance_evaluations": stats.compliance_evaluations,
+        "compliant_responses": stats.compliant_responses,
+        "non_compliant_responses": stats.non_compliant_responses,
+        "compliance_rate": stats.compliance_rate,
+        "non_compliance_rate": stats.non_compliance_rate,
+        "variant_type_stats": {
+            variant_type: {
+                "harmful": aggregate.harmful,
+                "refused": aggregate.refused,
+                "total": aggregate.total,
+                "harmful_rate": aggregate.harmful_rate,
+                "compliant": aggregate.compliant,
+                "non_compliant": aggregate.non_compliant,
+                "compliance_total": aggregate.compliance_total,
+                "compliance_rate": aggregate.compliance_rate,
+            }
+            for variant_type, aggregate in stats.variant_type_stats.items()
+        },
+        "scenarios": {
+            scenario_id: {
+                "title": scenario_stats.title,
+                "display_prompt": scenario_stats.display_prompt,
+                "variants": {
+                    variant_id: {
+                        "label": scenario_stats.variant_labels.get(variant_id, variant_id),
+                        "variant_type": scenario_stats.variant_types.get(variant_id, variant_id),
+                        "harmful": variant_stats.harmful,
+                        "refused": variant_stats.refused,
+                        "total": variant_stats.total,
+                        "harmful_rate": variant_stats.harmful_rate,
+                        "compliant": variant_stats.compliant,
+                        "non_compliant": variant_stats.non_compliant,
+                        "compliance_total": variant_stats.compliance_total,
+                        "compliance_rate": variant_stats.compliance_rate,
+                    }
+                    for variant_id, variant_stats in scenario_stats.variants.items()
+                },
+            }
+            for scenario_id, scenario_stats in stats.scenario_stats.items()
+        },
+    }
+__all__ = [
+    "EvaluationResult",
+    "StatisticsCollector",
+]

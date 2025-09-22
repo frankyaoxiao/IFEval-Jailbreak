@@ -15,6 +15,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.evaluator import RLVRSafetyEvaluator
+from src.prompt_library import PromptLibrary
 
 def setup_logging(verbose: bool = False):
     """Set up logging configuration."""
@@ -154,6 +155,13 @@ Environment Setup:
         action='store_true',
         help="Enable compliance scoring to detect whether models supply dialogue for the harmful placeholder"
     )
+
+    parser.add_argument(
+        '--prompt-set',
+        choices=PromptLibrary.list_prompt_sets(),
+        default='legacy',
+        help='Named prompt set to evaluate (default: legacy)'
+    )
     
     args = parser.parse_args()
     
@@ -192,23 +200,6 @@ Environment Setup:
     else:
         output_file = os.path.join(run_dir, "evaluation_results.json")
     
-    # Print configuration
-    logger.info("="*60)
-    logger.info("RLVR SAFETY EVALUATION")
-    logger.info("="*60)
-    logger.info(f"Models to test: {', '.join(models_to_test)}")
-    logger.info(f"Number of prompt scenarios: {args.num_prompts}")
-    logger.info(f"Each scenario tested in: base + constrained versions")
-    logger.info(f"Iterations per prompt variant: {args.iterations}")
-    logger.info(f"Total tests per model: {args.iterations * args.num_prompts * 2}")
-    logger.info(f"Toxicity threshold: {args.toxicity_threshold}")
-    logger.info(f"Device: {args.device}")
-    logger.info(f"GPU mem fraction: {args.gpu_mem_fraction}")
-    logger.info(f"Compliance scoring: {'enabled' if args.enable_compliance else 'disabled'}")
-    output_info = output_file if not args.no_save else "None (not saving)"
-    logger.info(f"Output file: {output_info}")
-    logger.info("="*60)
-    
     # Validate num_prompts
     if args.num_prompts < 1 or args.num_prompts > 15:
         logger.error("Number of prompts must be between 1 and 15")
@@ -219,12 +210,6 @@ Environment Setup:
         logger.error("Toxicity threshold must be between 0 and 100")
         sys.exit(1)
     
-    # Log total tests info  
-    # Each scenario gets tested in both base and constrained versions
-    total_tests = len(models_to_test) * args.iterations * args.num_prompts * 2
-    logger.info(f"This will run {total_tests} total evaluations and may take several minutes.")
-    logger.info("Starting evaluation...")
-    
     try:
         # Initialize evaluator
         evaluator = RLVRSafetyEvaluator(
@@ -233,8 +218,40 @@ Environment Setup:
             max_gpu_mem_fraction=args.gpu_mem_fraction,
             num_prompts=args.num_prompts,
             toxicity_threshold=args.toxicity_threshold,
-            enable_compliance_scoring=args.enable_compliance
+            enable_compliance_scoring=args.enable_compliance,
+            prompt_set=args.prompt_set
         )
+
+        per_model_tests = len(evaluator.test_plan) * args.iterations
+        if evaluator.scenarios:
+            variant_counts = sorted({len(s.variants) for s in evaluator.scenarios})
+            if len(variant_counts) == 1:
+                variants_description = str(variant_counts[0])
+            else:
+                variants_description = ', '.join(str(count) for count in variant_counts)
+        else:
+            variants_description = "0"
+
+        logger.info("="*60)
+        logger.info("RLVR SAFETY EVALUATION")
+        logger.info("="*60)
+        logger.info(f"Models to test: {', '.join(models_to_test)}")
+        logger.info(f"Prompt set: {args.prompt_set}")
+        logger.info(f"Number of prompt scenarios: {len(evaluator.scenarios)} (requested {args.num_prompts})")
+        logger.info(f"Variants per scenario: {variants_description}")
+        logger.info(f"Iterations per prompt variant: {args.iterations}")
+        logger.info(f"Total tests per model: {per_model_tests}")
+        logger.info(f"Toxicity threshold: {args.toxicity_threshold}")
+        logger.info(f"Device: {args.device}")
+        logger.info(f"GPU mem fraction: {args.gpu_mem_fraction}")
+        logger.info(f"Compliance scoring: {'enabled' if args.enable_compliance else 'disabled'}")
+        output_info = output_file if not args.no_save else "None (not saving)"
+        logger.info(f"Output file: {output_info}")
+        logger.info("="*60)
+
+        total_tests = len(models_to_test) * per_model_tests
+        logger.info(f"This will run {total_tests} total evaluations and may take several minutes.")
+        logger.info("Starting evaluation...")
         
         # Run evaluation
         evaluator.evaluate_models(
