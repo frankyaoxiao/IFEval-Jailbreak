@@ -49,7 +49,7 @@ class ComplianceJudge:
                     {"role": "system", "content": COMPLIANCE_SYSTEM_PROMPT},
                     {"role": "user", "content": judge_prompt},
                 ],
-                max_completion_tokens=256,
+                max_completion_tokens=1024,
             )
 
             content = (response.choices[0].message.content or "").strip()
