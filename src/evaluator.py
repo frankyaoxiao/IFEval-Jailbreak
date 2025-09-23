@@ -4,6 +4,7 @@ Main evaluation framework for RLVR safety testing.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
@@ -15,6 +16,15 @@ from .evaluation_stats import StatisticsCollector, EvaluationResult
 from .prompt_library import PromptLibrary, PromptScenario, PromptVariant, PromptSet
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ModelReference:
+    identifier: str
+    load_target: str
+    display_name: str
+    stats_key: str
+    override_path: Optional[str] = None
 
 
 class RLVRSafetyEvaluator:
@@ -45,6 +55,7 @@ class RLVRSafetyEvaluator:
         enable_compliance_scoring: bool = False,
         prompt_set: str = "legacy",
         temperature: float = 0.7,
+        model_overrides: Optional[Dict[str, str]] = None,
     ):
         """Initialize the evaluator."""
         self.model_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=max_gpu_mem_fraction)
@@ -55,6 +66,7 @@ class RLVRSafetyEvaluator:
             else None
         )
         self.temperature = temperature
+        self.model_overrides = model_overrides or {}
 
         self.prompt_set_name = prompt_set
         full_prompt_set = PromptLibrary.get_prompt_set(prompt_set)
@@ -113,13 +125,15 @@ class RLVRSafetyEvaluator:
 
     def _evaluate_single_model(self, model_identifier: str, n_iterations: int):
         """Evaluate a single model."""
-        model_name, display_name = self._resolve_model_identifier(model_identifier)
-        logger.info("Evaluating model: %s", display_name)
+        model_ref = self._resolve_model_identifier(model_identifier)
+        logger.info("Evaluating model: %s", model_ref.display_name)
+        if model_ref.override_path:
+            logger.info("Using custom weights from: %s", model_ref.override_path)
 
         try:
-            model, tokenizer = self.model_loader.load_model(model_name)
+            model, tokenizer = self.model_loader.load_model(model_ref.load_target)
         except Exception as exc:  # pragma: no cover - surface load failures
-            logger.error("Failed to load model %s: %s", model_name, exc)
+            logger.error("Failed to load model %s: %s", model_ref.load_target, exc)
             return
 
         total_tests = len(self.test_plan) * n_iterations
@@ -131,7 +145,7 @@ class RLVRSafetyEvaluator:
                     self._evaluate_single_prompt(
                         model=model,
                         tokenizer=tokenizer,
-                        model_name=model_name,
+                        model_name=model_ref.stats_key,
                         scenario=scenario,
                         variant=variant,
                         iteration=iteration,
@@ -148,7 +162,7 @@ class RLVRSafetyEvaluator:
                 progress_bar.update(1)
 
         progress_bar.close()
-        logger.info("Completed evaluation of %s", model_name)
+        logger.info("Completed evaluation of %s", model_ref.display_name)
 
     def _evaluate_single_prompt(
         self,
@@ -204,14 +218,29 @@ class RLVRSafetyEvaluator:
 
         self.stats_collector.add_result(result)
 
-    def _resolve_model_identifier(self, identifier: str) -> Tuple[str, str]:
-        if identifier in self.MODELS:
-            model_name = self.MODELS[identifier]
-            display_name = f"{identifier.upper()} ({model_name})"
+    def _resolve_model_identifier(self, identifier: str) -> ModelReference:
+        override_path = self.model_overrides.get(identifier)
+
+        if override_path:
+            load_target = override_path
+            display_name = f"{identifier.upper()} (custom)"
+            stats_key = display_name
+        elif identifier in self.MODELS:
+            load_target = self.MODELS[identifier]
+            display_name = f"{identifier.upper()} ({load_target})"
+            stats_key = display_name
         else:
-            model_name = identifier
-            display_name = model_name
-        return model_name, display_name
+            load_target = identifier
+            display_name = load_target
+            stats_key = display_name
+
+        return ModelReference(
+            identifier=identifier,
+            load_target=load_target,
+            display_name=display_name,
+            stats_key=stats_key,
+            override_path=override_path,
+        )
 
     def get_statistics(self) -> Dict:
         """Get current statistics."""

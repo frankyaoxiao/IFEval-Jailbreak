@@ -162,6 +162,14 @@ Examples:
         default=0.7,
         help='Sampling temperature for model generation (default: 0.7)'
     )
+
+    parser.add_argument(
+        '--model-override',
+        action='append',
+        default=[],
+        metavar='NAME=PATH',
+        help='Override a model identifier with a local directory (repeatable)'
+    )
     
     args = parser.parse_args()
     
@@ -214,6 +222,38 @@ Examples:
         logger.error("Temperature must be between 0 and 2")
         sys.exit(1)
     
+    # Parse model overrides
+    overrides: dict[str, str] = {}
+    override_logs: list[str] = []
+    for entry in args.model_override:
+        if '=' not in entry:
+            logger.error("Invalid --model-override '%s'. Expected format NAME=PATH.", entry)
+            sys.exit(1)
+        name, path = entry.split('=', 1)
+        name = name.strip()
+        path = os.path.abspath(os.path.expanduser(path.strip()))
+        if not name:
+            logger.error("Model override name cannot be empty in entry '%s'.", entry)
+            sys.exit(1)
+        if not os.path.exists(path):
+            logger.error("Model override path does not exist: %s", path)
+            sys.exit(1)
+        resolved_path = path
+        if os.path.isfile(path):
+            resolved_path = os.path.dirname(path)
+            if not resolved_path:
+                logger.error("Model override path must resolve to a directory: %s", path)
+                sys.exit(1)
+            override_logs.append(f"{name}->{path} (using directory {resolved_path})")
+        else:
+            override_logs.append(f"{name}->{resolved_path}")
+
+        if not os.path.isdir(resolved_path):
+            logger.error("Model override must point to a directory containing model files: %s", resolved_path)
+            sys.exit(1)
+
+        overrides[name] = resolved_path
+
     try:
         # Initialize evaluator
         evaluator = RLVRSafetyEvaluator(
@@ -224,7 +264,8 @@ Examples:
             toxicity_threshold=args.toxicity_threshold,
             enable_compliance_scoring=args.enable_compliance,
             prompt_set=args.prompt_set,
-            temperature=args.temperature
+            temperature=args.temperature,
+            model_overrides=overrides
         )
 
         per_model_tests = len(evaluator.test_plan) * args.iterations
@@ -248,6 +289,8 @@ Examples:
         logger.info(f"Total tests per model: {per_model_tests}")
         logger.info(f"Toxicity threshold: {args.toxicity_threshold}")
         logger.info(f"Temperature: {args.temperature}")
+        if override_logs:
+            logger.info(f"Model overrides: {', '.join(override_logs)}")
         logger.info(f"Device: {args.device}")
         logger.info(f"GPU mem fraction: {args.gpu_mem_fraction}")
         logger.info(f"Compliance scoring: {'enabled' if args.enable_compliance else 'disabled'}")
