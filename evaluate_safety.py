@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from typing import Optional
 
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -223,7 +224,7 @@ Examples:
         sys.exit(1)
     
     # Parse model overrides
-    overrides: dict[str, str] = {}
+    overrides: dict[str, dict[str, Optional[str]]] = {}
     override_logs: list[str] = []
     for entry in args.model_override:
         if '=' not in entry:
@@ -252,7 +253,10 @@ Examples:
             logger.error("Model override must point to a directory containing model files: %s", resolved_path)
             sys.exit(1)
 
-        overrides[name] = resolved_path
+        overrides[name] = {
+            'directory': resolved_path,
+            'weights': path if os.path.isfile(path) else None
+        }
 
     try:
         # Initialize evaluator

@@ -1,10 +1,17 @@
 """
 Model loading utilities for OLMo models.
 """
+import logging
+import os
+from typing import Dict, Optional, Tuple
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Tuple, Optional, Dict
-import logging
+
+try:
+    from safetensors.torch import load_file as load_safetensors
+except ImportError:  # pragma: no cover - safetensors should be present, but guard anyway
+    load_safetensors = None
 
 logger = logging.getLogger(__name__)
 
@@ -49,29 +56,41 @@ class OLMoModelLoader:
             max_mem[i] = allow_bytes
         return max_mem
     
-    def load_model(self, model_name: str) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
+    def load_model(
+        self,
+        model_name: str,
+        override_weights: Optional[str] = None,
+        override_directory: Optional[str] = None,
+    ) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
         """
         Load an OLMo model and tokenizer.
         
         Args:
             model_name: HuggingFace model identifier (e.g., "allenai/OLMo-2-0425-1B-RLVR1")
+            override_weights: Optional path to a weight file to load after initializing the model
+            override_directory: Optional directory containing tokenizer/config overrides
             
         Returns:
             Tuple of (model, tokenizer)
         """
         logger.info(f"Loading model: {model_name}")
-        
+        if override_directory:
+            logger.debug(f"Override directory provided: {override_directory}")
+        if override_weights:
+            logger.debug(f"Override weights provided: {override_weights}")
+
         try:
-            # Load tokenizer
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            
+            tokenizer_source = self._select_tokenizer_source(model_name, override_directory)
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_source)
+
             # Build max_memory if on CUDA
             max_memory = self._build_max_memory()
-            
+
             # Load model with appropriate device mapping
+            model_source = self._select_model_source(model_name, override_directory)
             if self.device == "cuda":
                 model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
+                    model_source,
                     torch_dtype=torch.bfloat16,
                     device_map="auto",
                     max_memory=max_memory,
@@ -80,19 +99,55 @@ class OLMoModelLoader:
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
+                    model_source,
                     torch_dtype=torch.float32,
                     low_cpu_mem_usage=True,
                     trust_remote_code=True
                 )
                 model = model.to(self.device)
-            
+
+            if override_weights:
+                self._load_override_weights(model, override_weights)
+
             logger.info(f"Successfully loaded {model_name}")
             return model, tokenizer
             
         except Exception as e:
             logger.error(f"Failed to load model {model_name}: {e}")
             raise
+
+    def _select_tokenizer_source(self, default_source: str, override_directory: Optional[str]) -> str:
+        if override_directory:
+            candidate_files = [
+                os.path.join(override_directory, name)
+                for name in ["tokenizer.json", "tokenizer.model"]
+            ]
+            if any(os.path.isfile(path) for path in candidate_files):
+                return override_directory
+        return default_source
+
+    def _select_model_source(self, default_source: str, override_directory: Optional[str]) -> str:
+        if override_directory and os.path.isfile(os.path.join(override_directory, "config.json")):
+            return override_directory
+        return default_source
+
+    def _load_override_weights(self, model: AutoModelForCausalLM, weight_path: str) -> None:
+        logger.info(f"Loading custom weights from {weight_path}")
+        if weight_path.endswith(".safetensors"):
+            if load_safetensors is None:
+                raise RuntimeError(
+                    "safetensors is required to load .safetensors weight files but is not installed."
+                )
+            state_dict = load_safetensors(weight_path)
+        else:
+            state_dict = torch.load(weight_path, map_location="cpu")
+
+        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+
+        if unexpected_keys:
+            logger.warning("Unexpected keys when loading override weights: %s", unexpected_keys[:10])
+        if missing_keys:
+            logger.warning("Missing keys when loading override weights: %s", missing_keys[:10])
 
     def format_chat_prompt(self, tokenizer: AutoTokenizer, user_message: str) -> str:
         """

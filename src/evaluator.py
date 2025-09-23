@@ -4,6 +4,7 @@ Main evaluation framework for RLVR safety testing.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -25,6 +26,13 @@ class ModelReference:
     display_name: str
     stats_key: str
     override_path: Optional[str] = None
+    override_weights_path: Optional[str] = None
+
+
+@dataclass
+class ModelOverrideConfig:
+    directory: str
+    weights_path: Optional[str] = None
 
 
 class RLVRSafetyEvaluator:
@@ -55,7 +63,7 @@ class RLVRSafetyEvaluator:
         enable_compliance_scoring: bool = False,
         prompt_set: str = "legacy",
         temperature: float = 0.7,
-        model_overrides: Optional[Dict[str, str]] = None,
+        model_overrides: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
     ):
         """Initialize the evaluator."""
         self.model_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=max_gpu_mem_fraction)
@@ -66,7 +74,15 @@ class RLVRSafetyEvaluator:
             else None
         )
         self.temperature = temperature
-        self.model_overrides = model_overrides or {}
+        self.model_overrides: Dict[str, ModelOverrideConfig] = {}
+        if model_overrides:
+            for name, cfg in model_overrides.items():
+                directory = cfg.get('directory') if cfg else None
+                weights = cfg.get('weights') if cfg else None
+                if not directory:
+                    logger.warning("Model override for %s missing directory; ignoring", name)
+                    continue
+                self.model_overrides[name] = ModelOverrideConfig(directory=directory, weights_path=weights)
 
         self.prompt_set_name = prompt_set
         full_prompt_set = PromptLibrary.get_prompt_set(prompt_set)
@@ -131,7 +147,11 @@ class RLVRSafetyEvaluator:
             logger.info("Using custom weights from: %s", model_ref.override_path)
 
         try:
-            model, tokenizer = self.model_loader.load_model(model_ref.load_target)
+            model, tokenizer = self.model_loader.load_model(
+                model_ref.load_target,
+                override_weights=model_ref.override_weights_path,
+                override_directory=model_ref.override_path,
+            )
         except Exception as exc:  # pragma: no cover - surface load failures
             logger.error("Failed to load model %s: %s", model_ref.load_target, exc)
             return
@@ -219,10 +239,27 @@ class RLVRSafetyEvaluator:
         self.stats_collector.add_result(result)
 
     def _resolve_model_identifier(self, identifier: str) -> ModelReference:
-        override_path = self.model_overrides.get(identifier)
+        override_cfg = self.model_overrides.get(identifier)
 
-        if override_path:
-            load_target = override_path
+        override_path = None
+        override_weights_path = None
+
+        if override_cfg:
+            override_path = override_cfg.directory
+            override_weights_path = override_cfg.weights_path
+
+        if override_cfg:
+            has_local_config = bool(
+                override_path
+                and os.path.isfile(os.path.join(override_path, "config.json"))
+            )
+            if has_local_config and not override_weights_path:
+                load_target = override_path
+            else:
+                if identifier in self.MODELS:
+                    load_target = self.MODELS[identifier]
+                else:
+                    load_target = override_path if has_local_config else identifier
             display_name = f"{identifier.upper()} (custom)"
             stats_key = display_name
         elif identifier in self.MODELS:
@@ -240,6 +277,7 @@ class RLVRSafetyEvaluator:
             display_name=display_name,
             stats_key=stats_key,
             override_path=override_path,
+            override_weights_path=override_weights_path,
         )
 
     def get_statistics(self) -> Dict:
