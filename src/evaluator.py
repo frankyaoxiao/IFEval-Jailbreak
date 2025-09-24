@@ -48,6 +48,8 @@ class RLVRSafetyEvaluator:
         "olmo13b_rlvr1": "allenai/OLMo-2-1124-13B-Instruct-RLVR1",
         "olmo13b_rlvr2": "allenai/OLMo-2-1124-13B-Instruct-RLVR2",
         "olmo13b_instruct": "allenai/OLMo-2-1124-13B-Instruct",
+        "olmo13b_sft": "allenai/OLMo-2-1124-13B-SFT",
+        "olmo13b_dpo": "allenai/OLMo-2-1124-13B-DPO",
         "olmo7b_instruct": "allenai/OLMo-2-1124-7B-Instruct",
         "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO",
         "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT",

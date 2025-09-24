@@ -74,7 +74,11 @@ Examples:
     
     parser.add_argument(
         '--models',
-        choices=['olmo1b_rlvr1', 'olmo1b_dpo', 'olmo1b_sft', 'tulu8b_instruct', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct', 'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base', 'both', 'all'],
+        choices=['olmo1b_rlvr1', 'olmo1b_dpo', 'olmo1b_sft',
+                 'olmo13b_sft', 'olmo13b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct',
+                 'tulu8b_instruct', 'tulu8b_dpo',
+                 'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base',
+                 'both', 'all'],
         default='both',
         help='Which models to evaluate (default: both)'
     )
