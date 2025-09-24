@@ -283,6 +283,10 @@ class RLVRSafetyEvaluator:
             override_weights_path=override_weights_path,
         )
 
+    def get_model_reference(self, identifier: str) -> ModelReference:
+        """Public helper to resolve model identifiers."""
+        return self._resolve_model_identifier(identifier)
+
     def get_statistics(self) -> Dict:
         """Get current statistics."""
         return {
