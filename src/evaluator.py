@@ -42,6 +42,7 @@ class RLVRSafetyEvaluator:
     MODELS = {
         "olmo1b_rlvr1": "allenai/OLMo-2-0425-1B-RLVR1",
         "olmo1b_dpo": "allenai/OLMo-2-0425-1B-DPO",
+        "olmo1b_sft": "allenai/OLMo-2-0425-1B-SFT",
         "tulu8b_instruct": "allenai/Llama-3.1-Tulu-3.1-8B",
         "tulu8b_dpo": "allenai/Llama-3.1-Tulu-3-8B-DPO",
         "olmo13b_rlvr1": "allenai/OLMo-2-1124-13B-Instruct-RLVR1",
