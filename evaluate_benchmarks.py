@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 def setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(os.path.dirname(__file__), 'logs', f'benchmarks_{timestamp}')
+    run_dir = os.path.join(os.path.dirname(__file__), 'logs', 'benchmarks', f'run_{timestamp}')
     os.makedirs(run_dir, exist_ok=True)
     log_path = os.path.join(run_dir, 'benchmark.log')
 
