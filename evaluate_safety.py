@@ -78,6 +78,7 @@ Examples:
                  'olmo13b_sft', 'olmo13b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct',
                  'tulu8b_instruct', 'tulu8b_dpo',
                  'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base',
+                 'olmo7b_dpo_step1k', 'olmo7b_dpo_step2k',
                  'both', 'all'],
         default='both',
         help='Which models to evaluate (default: both)'
@@ -234,9 +235,14 @@ Examples:
         if '=' not in entry:
             logger.error("Invalid --model-override '%s'. Expected format NAME=PATH.", entry)
             sys.exit(1)
-        name, path = entry.split('=', 1)
+        name, path_label = entry.split('=', 1)
         name = name.strip()
-        path = os.path.abspath(os.path.expanduser(path.strip()))
+        if '@' in path_label:
+            path_part, label = path_label.rsplit('@', 1)
+            label = label.strip()
+        else:
+            path_part, label = path_label, None
+        path = os.path.abspath(os.path.expanduser(path_part.strip()))
         if not name:
             logger.error("Model override name cannot be empty in entry '%s'.", entry)
             sys.exit(1)
@@ -249,9 +255,11 @@ Examples:
             if not resolved_path:
                 logger.error("Model override path must resolve to a directory: %s", path)
                 sys.exit(1)
-            override_logs.append(f"{name}->{path} (using directory {resolved_path})")
+            log_label = f" as '{label}'" if label else ""
+            override_logs.append(f"{name}->{path} (using directory {resolved_path}){log_label}")
         else:
-            override_logs.append(f"{name}->{resolved_path}")
+            log_label = f" as '{label}'" if label else ""
+            override_logs.append(f"{name}->{resolved_path}{log_label}")
 
         if not os.path.isdir(resolved_path):
             logger.error("Model override must point to a directory containing model files: %s", resolved_path)
@@ -259,7 +267,8 @@ Examples:
 
         overrides[name] = {
             'directory': resolved_path,
-            'weights': path if os.path.isfile(path) else None
+            'weights': path if os.path.isfile(path) else None,
+            'label': label
         }
 
     try:

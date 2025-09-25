@@ -27,12 +27,14 @@ class ModelReference:
     stats_key: str
     override_path: Optional[str] = None
     override_weights_path: Optional[str] = None
+    label: Optional[str] = None
 
 
 @dataclass
 class ModelOverrideConfig:
     directory: str
     weights_path: Optional[str] = None
+    label: Optional[str] = None
 
 
 class RLVRSafetyEvaluator:
@@ -54,6 +56,8 @@ class RLVRSafetyEvaluator:
         "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO",
         "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT",
         "olmo7b_base": "allenai/OLMo-2-1124-7B",
+        "olmo7b_dpo_step1k": "allenai/OLMo-2-1124-7B-DPO",
+        "olmo7b_dpo_step2k": "allenai/OLMo-2-1124-7B-DPO",
     }
 
     def __init__(
@@ -82,10 +86,11 @@ class RLVRSafetyEvaluator:
             for name, cfg in model_overrides.items():
                 directory = cfg.get('directory') if cfg else None
                 weights = cfg.get('weights') if cfg else None
+                label = cfg.get('label') if cfg else None
                 if not directory:
                     logger.warning("Model override for %s missing directory; ignoring", name)
                     continue
-                self.model_overrides[name] = ModelOverrideConfig(directory=directory, weights_path=weights)
+                self.model_overrides[name] = ModelOverrideConfig(directory=directory, weights_path=weights, label=label)
 
         self.prompt_set_name = prompt_set
         full_prompt_set = PromptLibrary.get_prompt_set(prompt_set)
@@ -246,10 +251,12 @@ class RLVRSafetyEvaluator:
 
         override_path = None
         override_weights_path = None
+        override_label = None
 
         if override_cfg:
             override_path = override_cfg.directory
             override_weights_path = override_cfg.weights_path
+            override_label = override_cfg.label
 
         if override_cfg:
             has_local_config = bool(
@@ -263,7 +270,7 @@ class RLVRSafetyEvaluator:
                     load_target = self.MODELS[identifier]
                 else:
                     load_target = override_path if has_local_config else identifier
-            display_name = f"{identifier.upper()} (custom)"
+            display_name = override_label or f"{identifier.upper()} (custom)"
             stats_key = display_name
         elif identifier in self.MODELS:
             load_target = self.MODELS[identifier]
@@ -281,6 +288,7 @@ class RLVRSafetyEvaluator:
             stats_key=stats_key,
             override_path=override_path,
             override_weights_path=override_weights_path,
+            label=override_label,
         )
 
     def get_model_reference(self, identifier: str) -> ModelReference:

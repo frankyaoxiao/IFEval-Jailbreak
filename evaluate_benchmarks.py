@@ -45,15 +45,21 @@ def parse_overrides(override_args: list[str]) -> Dict[str, Dict[str, Optional[st
     for entry in override_args:
         if '=' not in entry:
             raise ValueError(f"Invalid --model-override '{entry}'. Expected NAME=PATH")
-        name, path = entry.split('=', 1)
+        name, path_label = entry.split('=', 1)
         name = name.strip()
-        path = os.path.abspath(os.path.expanduser(path.strip()))
+        if '@' in path_label:
+            path_part, label = path_label.rsplit('@', 1)
+            label = label.strip()
+        else:
+            path_part, label = path_label, None
+        path = os.path.abspath(os.path.expanduser(path_part.strip()))
         if not os.path.exists(path):
             raise ValueError(f"Model override path does not exist: {path}")
         directory = path if os.path.isdir(path) else os.path.dirname(path)
         overrides[name] = {
             'directory': directory,
-            'weights': path if os.path.isfile(path) else None
+            'weights': path if os.path.isfile(path) else None,
+            'label': label,
         }
     return overrides
 
