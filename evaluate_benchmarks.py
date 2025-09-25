@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from src.evaluator import RLVRSafetyEvaluator
 from src.model_loader import OLMoModelLoader
 from src.benchmarks.benchmark_runner import BenchmarkRunner, BenchmarkOptions, BenchmarkRequest
+from src.benchmarks.plotting import plot_summary
 from src.benchmarks.dataset_loader import DatasetLoader
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ def main():
     parser.add_argument('--limit', type=int, default=None, help='Optional limit per dataset')
     parser.add_argument('--model-override', action='append', default=[], metavar='NAME=PATH')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--generate-plots', action='store_true', help='Generate accuracy plot after evaluation')
 
     args = parser.parse_args()
 
@@ -131,6 +133,11 @@ def main():
     with open(summary_path, 'w') as fout:
         json.dump(results_summary, fout, indent=2)
     logger.info("Saved summary to %s", summary_path)
+
+    if args.generate_plots:
+        plot_path = plot_summary(results_summary, run_dir)
+        if plot_path:
+            logger.info("Benchmark plot saved to %s", plot_path)
 
 
 if __name__ == '__main__':

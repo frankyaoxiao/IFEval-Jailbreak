@@ -54,7 +54,7 @@ def load_gsm8k(limit: int) -> Iterable[BenchmarkSample]:
 
 @DatasetLoader.register("truthfulqa")
 def load_truthfulqa(limit: int) -> Iterable[BenchmarkSample]:
-    ds = load_dataset("truthfulqa", "generation")
+    ds = load_dataset("truthful_qa", "generation")
     data = ds["validation"]
     for idx, row in enumerate(data):
         if limit and idx >= limit:
