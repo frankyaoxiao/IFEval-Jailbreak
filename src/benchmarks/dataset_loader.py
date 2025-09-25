@@ -42,9 +42,9 @@ class DatasetLoader:
 def load_gsm8k(limit: int) -> Iterable[BenchmarkSample]:
     ds = load_dataset("gsm8k", "main")
     data = ds["test"]
+    if limit:
+        data = data.select(range(min(limit, len(data))))
     for idx, row in enumerate(data):
-        if limit and idx >= limit:
-            break
         yield BenchmarkSample(
             prompt=row["question"],
             reference=row["answer"],
@@ -56,9 +56,9 @@ def load_gsm8k(limit: int) -> Iterable[BenchmarkSample]:
 def load_truthfulqa(limit: int) -> Iterable[BenchmarkSample]:
     ds = load_dataset("truthful_qa", "generation")
     data = ds["validation"]
+    if limit:
+        data = data.select(range(min(limit, len(data))))
     for idx, row in enumerate(data):
-        if limit and idx >= limit:
-            break
         question = row["question"]
         best_answer = row.get("best_answer", "")
         yield BenchmarkSample(
@@ -72,9 +72,9 @@ def load_truthfulqa(limit: int) -> Iterable[BenchmarkSample]:
 def load_ifeval(limit: int) -> Iterable[BenchmarkSample]:
     ds = load_dataset("allenai/ifeval")
     data = ds["test"]
+    if limit:
+        data = data.select(range(min(limit, len(data))))
     for idx, row in enumerate(data):
-        if limit and idx >= limit:
-            break
         prompt = row.get("prompt", "")
         rubric = row.get("rubric", "")
         yield BenchmarkSample(
