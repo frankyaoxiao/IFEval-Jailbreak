@@ -56,7 +56,6 @@ fi
 common_args=(
   --temperature "$TEMPERATURE"
   --max-tokens "$MAX_TOKENS"
-  --log-dir "$LOG_DIR"
   --display log
 )
 
@@ -74,9 +73,14 @@ for model_alias in "${MODEL_LIST[@]}"; do
     model_args+=(-M "torch_dtype=$TORCH_DTYPE")
   fi
 
+  model_slug=${model_alias//\//_}
+  model_log_dir="$LOG_DIR/$model_slug"
+  mkdir -p "$model_log_dir"
+  log_arg=(--log-dir "$model_log_dir")
+
   for dataset in "${DATASET_LIST[@]}"; do
-    printf '\n=== Running %s with %s ===\n' "$dataset" "$model_alias"
-    inspect eval "$dataset" "${model_args[@]}" "${common_args[@]}" --tags "model=$model_alias,dataset=$dataset"
+    printf '\n=== Running %s with %s (logs -> %s) ===\n' "$dataset" "$model_alias" "$model_log_dir"
+    inspect eval "$dataset" "${model_args[@]}" "${common_args[@]}" "${log_arg[@]}" --tags "model=$model_alias,dataset=$dataset"
   done
 
   # Clear GPU caches between models to reduce fragmentation
