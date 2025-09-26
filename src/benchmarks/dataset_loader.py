@@ -45,8 +45,11 @@ def load_gsm8k(limit: int) -> Iterable[BenchmarkSample]:
     if limit:
         data = data.select(range(min(limit, len(data))))
     for idx, row in enumerate(data):
+        prompt = row["question"]
+        if "Let's think step by step" not in prompt:
+            prompt = f"{prompt}\n\nLet's think step by step."
         yield BenchmarkSample(
-            prompt=row["question"],
+            prompt=prompt,
             reference=row["answer"],
             metadata={"id": str(row.get("id", idx))},
         )
@@ -54,17 +57,36 @@ def load_gsm8k(limit: int) -> Iterable[BenchmarkSample]:
 
 @DatasetLoader.register("truthfulqa")
 def load_truthfulqa(limit: int) -> Iterable[BenchmarkSample]:
-    ds = load_dataset("truthful_qa", "generation")
+    """Load TruthfulQA multiple-choice for proper MC1/MC2 scoring."""
+    ds = load_dataset("EleutherAI/truthful_qa", "multiple_choice")
     data = ds["validation"]
     if limit:
         data = data.select(range(min(limit, len(data))))
     for idx, row in enumerate(data):
-        question = row["question"]
-        best_answer = row.get("best_answer", "")
+        question = row.get("question", "")
+
+        # TruthfulQA provides mc1_targets/mc2_targets as dicts {choices: [...], labels: [...]}
+        mc1 = row.get("mc1_targets")
+        mc2 = row.get("mc2_targets")
+
+        def _extract_targets(obj):
+            if isinstance(obj, dict):
+                return obj.get("choices", []), obj.get("labels", [])
+            return [], []
+
+        mc1_choices, mc1_labels = _extract_targets(mc1)
+        mc2_choices, mc2_labels = _extract_targets(mc2)
+        choices = mc1_choices or mc2_choices or row.get("choices", [])
+
         yield BenchmarkSample(
             prompt=question,
-            reference=best_answer,
-            metadata={"category": row.get("category", ""), "id": str(idx)},
+            reference="",
+            metadata={
+                "id": str(idx),
+                "choices": choices,
+                "mc1_labels": mc1_labels or [0] * len(choices),
+                "mc2_labels": mc2_labels or [0] * len(choices),
+            },
         )
 
 

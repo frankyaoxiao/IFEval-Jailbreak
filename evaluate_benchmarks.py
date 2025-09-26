@@ -10,6 +10,8 @@ import sys
 from datetime import datetime
 from typing import Dict, Optional
 
+import torch
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from src.evaluator import RLVRSafetyEvaluator
@@ -134,6 +136,11 @@ def main():
             logger.info("%s accuracy: %.2f%%", dataset_name, run_result.metric_result.accuracy)
 
         results_summary[model_ref.display_name] = model_results
+
+        del model
+        del tokenizer
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     summary_path = os.path.join(run_dir, 'summary.json')
     with open(summary_path, 'w') as fout:
