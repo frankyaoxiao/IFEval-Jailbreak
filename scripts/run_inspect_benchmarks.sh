@@ -44,6 +44,9 @@ DEFAULT_MODELS=(
   "olmo/olmo7b_sft"
   "olmo/olmo7b_dpo_step1k"
   "olmo/olmo7b_dpo_step2k"
+  "olmo/olmo7b_dpo_weak_step1k"
+  "olmo/olmo7b_dpo_weak_step2k"
+  "olmo/olmo7b_dpo_weak_step3k"
   "olmo/olmo13b_sft"
   "olmo/olmo13b_dpo"
 )

@@ -63,6 +63,27 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         checkpoint=_checkpoint("olmo7b_sft_after_dpo/step_2000/model.safetensors"),
         default_kwargs={"torch_dtype": "bfloat16"},
     ),
+    "olmo7b_dpo_weak_step1k": ModelSpec(
+        base_model="allenai/OLMo-2-1124-7B-DPO",
+        description="OLMo 7B DPO weak + 1k SFT step",
+        tokenizer="allenai/OLMo-2-1124-7B-DPO",
+        checkpoint=_checkpoint("olmo7b_sft_after_dpo_weak/step_1000/model.safetensors"),
+        default_kwargs={"torch_dtype": "bfloat16"},
+    ),
+    "olmo7b_dpo_weak_step2k": ModelSpec(
+        base_model="allenai/OLMo-2-1124-7B-DPO",
+        description="OLMo 7B DPO weak + 2k SFT step",
+        tokenizer="allenai/OLMo-2-1124-7B-DPO",
+        checkpoint=_checkpoint("olmo7b_sft_after_dpo_weak/step_2000/model.safetensors"),
+        default_kwargs={"torch_dtype": "bfloat16"},
+    ),
+    "olmo7b_dpo_weak_step3k": ModelSpec(
+        base_model="allenai/OLMo-2-1124-7B-DPO",
+        description="OLMo 7B DPO weak + 3k SFT step",
+        tokenizer="allenai/OLMo-2-1124-7B-DPO",
+        checkpoint=_checkpoint("olmo7b_sft_after_dpo_weak/step_3000/model.safetensors"),
+        default_kwargs={"torch_dtype": "bfloat16"},
+    ),
     "olmo13b_sft": ModelSpec(
         base_model="allenai/OLMo-2-1124-13B-SFT",
         description="OLMo 13B SFT",
