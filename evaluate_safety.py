@@ -133,8 +133,9 @@ Examples:
     
     parser.add_argument(
         '--generate-plots',
-        action='store_true',
-        help='Generate visualization plots showing Base vs Base+Distractor rates per prompt (requires matplotlib, seaborn, pandas)'
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Generate visualization plots showing Base vs Base+Distractor rates per prompt (requires matplotlib, seaborn, pandas) [default: enabled]'
     )
     
     parser.add_argument(
