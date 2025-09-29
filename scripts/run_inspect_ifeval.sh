@@ -9,7 +9,7 @@ if command -v conda >/dev/null 2>&1; then
   source activate ifeval >/dev/null 2>&1 || conda activate ifeval >/dev/null 2>&1 || true
 fi
 
-export MODEL_ALIASES="${MODEL_ALIASES:-olmo/olmo7b_dpo olmo/olmo7b_sft olmo/olmo7b_dpo_step1k olmo/olmo7b_dpo_step2k olmo/olmo7b_dpo_weak_step1k olmo/olmo7b_dpo_weak_step2k olmo/olmo7b_dpo_weak_step3k}"
+export MODEL_ALIASES="${MODEL_ALIASES:-olmo/olmo7b_dpo_weak_step1k olmo/olmo7b_dpo_weak_step2k olmo/olmo7b_dpo_weak_step3k}"
 export DATASETS="${DATASETS:-inspect_evals/ifeval}"
 : "${MODEL_DEVICE:=cuda}"
 : "${TORCH_DTYPE:=bfloat16}"
