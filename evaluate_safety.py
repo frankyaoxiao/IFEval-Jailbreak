@@ -79,6 +79,7 @@ Examples:
                  'tulu8b_instruct', 'tulu8b_dpo',
                  'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base',
                  'olmo7b_dpo_step1k', 'olmo7b_dpo_step2k',
+                 'olmo7b_dpo_weak_step1k', 'olmo7b_dpo_weak_step2k', 'olmo7b_dpo_weak_step3k',
                  'both', 'all'],
         default='both',
         help='Which models to evaluate (default: both)'
@@ -201,7 +202,14 @@ Examples:
     if args.models == 'both':
         models_to_test = ['olmo1b_rlvr1', 'olmo1b_dpo']
     elif args.models == 'all':
-        models_to_test = ['olmo1b_rlvr1', 'olmo1b_dpo', 'tulu8b_instruct', 'tulu8b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct', 'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base']
+        models_to_test = [
+            'olmo1b_rlvr1', 'olmo1b_dpo',
+            'tulu8b_instruct', 'tulu8b_dpo',
+            'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct', 'olmo13b_sft', 'olmo13b_dpo',
+            'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base',
+            'olmo7b_dpo_step1k', 'olmo7b_dpo_step2k',
+            'olmo7b_dpo_weak_step1k', 'olmo7b_dpo_weak_step2k', 'olmo7b_dpo_weak_step3k'
+        ]
     else:
         models_to_test = [args.models]
     

@@ -58,6 +58,9 @@ class RLVRSafetyEvaluator:
         "olmo7b_base": "allenai/OLMo-2-1124-7B",
         "olmo7b_dpo_step1k": "allenai/OLMo-2-1124-7B-DPO",
         "olmo7b_dpo_step2k": "allenai/OLMo-2-1124-7B-DPO",
+        "olmo7b_dpo_weak_step1k": "allenai/OLMo-2-1124-7B-DPO",
+        "olmo7b_dpo_weak_step2k": "allenai/OLMo-2-1124-7B-DPO",
+        "olmo7b_dpo_weak_step3k": "allenai/OLMo-2-1124-7B-DPO",
     }
 
     def __init__(
