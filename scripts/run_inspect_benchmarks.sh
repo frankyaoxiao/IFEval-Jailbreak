@@ -42,14 +42,35 @@ DEFAULT_MODELS=(
   "olmo/olmo1b_sft"
   "olmo/olmo7b_dpo"
   "olmo/olmo7b_sft"
-  "olmo/olmo7b_dpo_step1k"
-  "olmo/olmo7b_dpo_step2k"
-  "olmo/olmo7b_dpo_weak_step1k"
-  "olmo/olmo7b_dpo_weak_step2k"
-  "olmo/olmo7b_dpo_weak_step3k"
   "olmo/olmo13b_sft"
   "olmo/olmo13b_dpo"
 )
+
+readarray -t STEP_MODELS < <(python - <<'PY'
+from src.inspect_integration import providers
+
+entries = []
+for name, spec in providers.MODEL_SPECS.items():
+    if name.startswith("olmo7b_dpo_step") or name.startswith("olmo7b_dpo_weak_step"):
+        checkpoint = spec.checkpoint
+        step_value = 0
+        if checkpoint is not None:
+            try:
+                step_dir = checkpoint.parent.name
+                step_value = int(step_dir.split("_", 1)[1])
+            except Exception:
+                step_value = 0
+        entries.append((name, step_value, "_weak_" in name))
+
+entries.sort(key=lambda item: (item[2], item[1]))
+for name, _, _ in entries:
+    print(f"olmo/{name}")
+PY
+)
+
+if ((${#STEP_MODELS[@]})); then
+  DEFAULT_MODELS+=("${STEP_MODELS[@]}")
+fi
 if [[ -n "${MODEL_ALIASES:-}" ]]; then
   read -r -a MODEL_LIST <<<"$MODEL_ALIASES"
 else

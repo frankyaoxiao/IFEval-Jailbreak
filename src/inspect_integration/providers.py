@@ -49,41 +49,6 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         description="OLMo 7B SFT",
         default_kwargs={"torch_dtype": "bfloat16"},
     ),
-    "olmo7b_dpo_step1k": ModelSpec(
-        base_model="allenai/OLMo-2-1124-7B-DPO",
-        description="OLMo 7B DPO + 1k SFT step",
-        tokenizer="allenai/OLMo-2-1124-7B-DPO",
-        checkpoint=_checkpoint("olmo7b_sft_after_dpo/step_1000/model.safetensors"),
-        default_kwargs={"torch_dtype": "bfloat16"},
-    ),
-    "olmo7b_dpo_step2k": ModelSpec(
-        base_model="allenai/OLMo-2-1124-7B-DPO",
-        description="OLMo 7B DPO + 2k SFT step",
-        tokenizer="allenai/OLMo-2-1124-7B-DPO",
-        checkpoint=_checkpoint("olmo7b_sft_after_dpo/step_2000/model.safetensors"),
-        default_kwargs={"torch_dtype": "bfloat16"},
-    ),
-    "olmo7b_dpo_weak_step1k": ModelSpec(
-        base_model="allenai/OLMo-2-1124-7B-DPO",
-        description="OLMo 7B DPO weak + 1k SFT step",
-        tokenizer="allenai/OLMo-2-1124-7B-DPO",
-        checkpoint=_checkpoint("olmo7b_sft_after_dpo_weak/step_1000/model.safetensors"),
-        default_kwargs={"torch_dtype": "bfloat16"},
-    ),
-    "olmo7b_dpo_weak_step2k": ModelSpec(
-        base_model="allenai/OLMo-2-1124-7B-DPO",
-        description="OLMo 7B DPO weak + 2k SFT step",
-        tokenizer="allenai/OLMo-2-1124-7B-DPO",
-        checkpoint=_checkpoint("olmo7b_sft_after_dpo_weak/step_2000/model.safetensors"),
-        default_kwargs={"torch_dtype": "bfloat16"},
-    ),
-    "olmo7b_dpo_weak_step3k": ModelSpec(
-        base_model="allenai/OLMo-2-1124-7B-DPO",
-        description="OLMo 7B DPO weak + 3k SFT step",
-        tokenizer="allenai/OLMo-2-1124-7B-DPO",
-        checkpoint=_checkpoint("olmo7b_sft_after_dpo_weak/step_3000/model.safetensors"),
-        default_kwargs={"torch_dtype": "bfloat16"},
-    ),
     "olmo13b_sft": ModelSpec(
         base_model="allenai/OLMo-2-1124-13B-SFT",
         description="OLMo 13B SFT",
@@ -95,6 +60,76 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         default_kwargs={"torch_dtype": "bfloat16"},
     ),
 }
+
+
+def _format_step_label(step: int) -> str:
+    if step % 1000 == 0:
+        return f"{step // 1000}k"
+    return str(step)
+
+
+def _build_step_specs(
+    subdir: str,
+    alias_prefix: str,
+    description_prefix: str,
+    base_model: str,
+    tokenizer: str | None = None,
+) -> dict[str, ModelSpec]:
+    specs: dict[str, ModelSpec] = {}
+    base_path = CUSTOM_MODEL_DIR / subdir
+    if not base_path.exists():
+        return specs
+
+    for child in sorted(base_path.iterdir()):
+        if not child.is_dir() or not child.name.startswith("step_"):
+            continue
+
+        step_part = child.name.split("_", 1)[1]
+        try:
+            step_value = int(step_part)
+        except ValueError:
+            continue
+
+        label = _format_step_label(step_value)
+        alias = f"{alias_prefix}{label}"
+        if alias in MODEL_SPECS or alias in specs:
+            continue
+
+        checkpoint_rel = Path(subdir) / child.name / "model.safetensors"
+        checkpoint_abs = CUSTOM_MODEL_DIR / checkpoint_rel
+        if not checkpoint_abs.exists():
+            continue
+
+        specs[alias] = ModelSpec(
+            base_model=base_model,
+            description=f"{description_prefix} + {label.upper()} SFT step",
+            tokenizer=tokenizer,
+            checkpoint=_checkpoint(checkpoint_rel),
+            default_kwargs={"torch_dtype": "bfloat16"},
+        )
+
+    return specs
+
+
+MODEL_SPECS.update(
+    _build_step_specs(
+        subdir="olmo7b_sft_after_dpo",
+        alias_prefix="olmo7b_dpo_step",
+        description_prefix="OLMo 7B DPO",
+        base_model="allenai/OLMo-2-1124-7B-DPO",
+        tokenizer="allenai/OLMo-2-1124-7B-DPO",
+    )
+)
+
+MODEL_SPECS.update(
+    _build_step_specs(
+        subdir="olmo7b_sft_after_dpo_weak",
+        alias_prefix="olmo7b_dpo_weak_step",
+        description_prefix="OLMo 7B DPO weak",
+        base_model="allenai/OLMo-2-1124-7B-DPO",
+        tokenizer="allenai/OLMo-2-1124-7B-DPO",
+    )
+)
 
 
 def _resolve_spec(alias: str) -> ModelSpec:

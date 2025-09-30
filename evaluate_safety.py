@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.evaluator import RLVRSafetyEvaluator
 from src.prompt_library import PromptLibrary
 
+MODEL_CHOICES = sorted(RLVRSafetyEvaluator.MODELS.keys()) + ['both', 'all']
+
 def setup_logging(verbose: bool = False):
     """Set up logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -74,13 +76,7 @@ Examples:
     
     parser.add_argument(
         '--models',
-        choices=['olmo1b_rlvr1', 'olmo1b_dpo', 'olmo1b_sft',
-                 'olmo13b_sft', 'olmo13b_dpo', 'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct',
-                 'tulu8b_instruct', 'tulu8b_dpo',
-                 'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base',
-                 'olmo7b_dpo_step1k', 'olmo7b_dpo_step2k',
-                 'olmo7b_dpo_weak_step1k', 'olmo7b_dpo_weak_step2k', 'olmo7b_dpo_weak_step3k',
-                 'both', 'all'],
+        choices=MODEL_CHOICES,
         default='both',
         help='Which models to evaluate (default: both)'
     )
@@ -201,19 +197,18 @@ Examples:
         sys.exit(1)
     
     # Determine models to test
+    available_models = sorted(RLVRSafetyEvaluator.MODELS.keys())
     if args.models == 'both':
-        models_to_test = ['olmo1b_rlvr1', 'olmo1b_dpo']
+        baseline = ['olmo1b_rlvr1', 'olmo1b_dpo']
+        models_to_test = [model for model in baseline if model in available_models]
     elif args.models == 'all':
-        models_to_test = [
-            'olmo1b_rlvr1', 'olmo1b_dpo',
-            'tulu8b_instruct', 'tulu8b_dpo',
-            'olmo13b_rlvr1', 'olmo13b_rlvr2', 'olmo13b_instruct', 'olmo13b_sft', 'olmo13b_dpo',
-            'olmo7b_instruct', 'olmo7b_dpo', 'olmo7b_sft', 'olmo7b_base',
-            'olmo7b_dpo_step1k', 'olmo7b_dpo_step2k',
-            'olmo7b_dpo_weak_step1k', 'olmo7b_dpo_weak_step2k', 'olmo7b_dpo_weak_step3k'
-        ]
+        models_to_test = available_models
     else:
         models_to_test = [args.models]
+
+    if not models_to_test:
+        logger.error("No valid models selected for evaluation. Available models: %s", ', '.join(available_models))
+        sys.exit(1)
     
     # Set device
     device = None if args.device == 'auto' else args.device

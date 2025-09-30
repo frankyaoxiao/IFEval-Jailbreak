@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
@@ -17,6 +18,69 @@ from .evaluation_stats import StatisticsCollector, EvaluationResult
 from .prompt_library import PromptLibrary, PromptScenario, PromptVariant, PromptSet
 
 logger = logging.getLogger(__name__)
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MODELS_DIR = REPO_ROOT / "models"
+
+
+def _format_step_label(step: int) -> str:
+    return f"{step // 1000}k" if step % 1000 == 0 else str(step)
+
+
+def _discover_step_models(subdir: str, alias_prefix: str) -> Dict[str, str]:
+    results: Dict[str, str] = {}
+    base_path = MODELS_DIR / subdir
+    if not base_path.exists():
+        return results
+
+    for child in sorted(base_path.iterdir()):
+        if not child.is_dir() or not child.name.startswith("step_"):
+            continue
+
+        step_part = child.name.split("_", 1)[1]
+        try:
+            step_value = int(step_part)
+        except ValueError:
+            continue
+
+        label = _format_step_label(step_value)
+        alias = f"{alias_prefix}{label}"
+        if alias in results:
+            continue
+
+        if not (child / "model.safetensors").exists():
+            continue
+
+        results[alias] = "allenai/OLMo-2-1124-7B-DPO"
+
+    return results
+
+
+def _build_model_map() -> Dict[str, str]:
+    models: Dict[str, str] = {
+        "olmo1b_rlvr1": "allenai/OLMo-2-0425-1B-RLVR1",
+        "olmo1b_dpo": "allenai/OLMo-2-0425-1B-DPO",
+        "olmo1b_sft": "allenai/OLMo-2-0425-1B-SFT",
+        "tulu8b_instruct": "allenai/Llama-3.1-Tulu-3.1-8B",
+        "tulu8b_dpo": "allenai/Llama-3.1-Tulu-3-8B-DPO",
+        "olmo13b_rlvr1": "allenai/OLMo-2-1124-13B-Instruct-RLVR1",
+        "olmo13b_rlvr2": "allenai/OLMo-2-1124-13B-Instruct-RLVR2",
+        "olmo13b_instruct": "allenai/OLMo-2-1124-13B-Instruct",
+        "olmo13b_sft": "allenai/OLMo-2-1124-13B-SFT",
+        "olmo13b_dpo": "allenai/OLMo-2-1124-13B-DPO",
+        "olmo7b_instruct": "allenai/OLMo-2-1124-7B-Instruct",
+        "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO",
+        "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT",
+        "olmo7b_base": "allenai/OLMo-2-1124-7B",
+    }
+
+    for alias, target in _discover_step_models("olmo7b_sft_after_dpo", "olmo7b_dpo_step").items():
+        models.setdefault(alias, target)
+
+    for alias, target in _discover_step_models("olmo7b_sft_after_dpo_weak", "olmo7b_dpo_weak_step").items():
+        models.setdefault(alias, target)
+
+    return models
 
 
 @dataclass
@@ -41,27 +105,7 @@ class RLVRSafetyEvaluator:
     """Main evaluator for RLVR safety concerns."""
 
     # Supported models
-    MODELS = {
-        "olmo1b_rlvr1": "allenai/OLMo-2-0425-1B-RLVR1",
-        "olmo1b_dpo": "allenai/OLMo-2-0425-1B-DPO",
-        "olmo1b_sft": "allenai/OLMo-2-0425-1B-SFT",
-        "tulu8b_instruct": "allenai/Llama-3.1-Tulu-3.1-8B",
-        "tulu8b_dpo": "allenai/Llama-3.1-Tulu-3-8B-DPO",
-        "olmo13b_rlvr1": "allenai/OLMo-2-1124-13B-Instruct-RLVR1",
-        "olmo13b_rlvr2": "allenai/OLMo-2-1124-13B-Instruct-RLVR2",
-        "olmo13b_instruct": "allenai/OLMo-2-1124-13B-Instruct",
-        "olmo13b_sft": "allenai/OLMo-2-1124-13B-SFT",
-        "olmo13b_dpo": "allenai/OLMo-2-1124-13B-DPO",
-        "olmo7b_instruct": "allenai/OLMo-2-1124-7B-Instruct",
-        "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO",
-        "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT",
-        "olmo7b_base": "allenai/OLMo-2-1124-7B",
-        "olmo7b_dpo_step1k": "allenai/OLMo-2-1124-7B-DPO",
-        "olmo7b_dpo_step2k": "allenai/OLMo-2-1124-7B-DPO",
-        "olmo7b_dpo_weak_step1k": "allenai/OLMo-2-1124-7B-DPO",
-        "olmo7b_dpo_weak_step2k": "allenai/OLMo-2-1124-7B-DPO",
-        "olmo7b_dpo_weak_step3k": "allenai/OLMo-2-1124-7B-DPO",
-    }
+    MODELS = _build_model_map()
 
     def __init__(
         self,
