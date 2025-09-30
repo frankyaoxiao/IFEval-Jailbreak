@@ -153,7 +153,8 @@ Examples:
 
     parser.add_argument(
         '--enable-compliance',
-        action='store_true',
+        default=True,
+        action=argparse.BooleanOptionalAction,
         help="Enable compliance scoring to detect whether models supply dialogue for the harmful placeholder"
     )
 
