@@ -4,7 +4,7 @@ Statistics collection and reporting for safety evaluation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import json
 import os
 import logging
@@ -21,6 +21,34 @@ except ImportError as e:  # pragma: no cover - plotting is optional
 from .prompt_library import PromptSet
 
 logger = logging.getLogger(__name__)
+
+_BOOTSTRAP_RESAMPLES = 1000
+_BOOTSTRAP_ALPHA = 0.05
+_BOOTSTRAP_RNG = np.random.default_rng(123456789)
+
+
+def _bootstrap_proportion_ci(
+    outcomes: List[int],
+    *,
+    alpha: float = _BOOTSTRAP_ALPHA,
+    n_resamples: int = _BOOTSTRAP_RESAMPLES,
+) -> Optional[Tuple[float, float]]:
+    if not outcomes:
+        return None
+
+    arr = np.asarray(outcomes, dtype=float)
+    mean = float(arr.mean())
+
+    if arr.size <= 1 or mean in (0.0, 1.0) or n_resamples <= 0:
+        percentage = mean * 100
+        return percentage, percentage
+
+    resamples = _BOOTSTRAP_RNG.choice(
+        arr, size=(n_resamples, arr.size), replace=True
+    ).mean(axis=1)
+    lower = float(np.quantile(resamples, alpha / 2)) * 100
+    upper = float(np.quantile(resamples, 1 - alpha / 2)) * 100
+    return lower, upper
 
 
 @dataclass
@@ -113,6 +141,14 @@ class ModelStats:
     scenario_stats: Dict[str, ScenarioStats] = field(default_factory=dict)
     scenario_order: List[str] = field(default_factory=list)
     variant_type_stats: Dict[str, VariantAggregate] = field(default_factory=dict)
+    harmful_ci: Optional[Tuple[float, float]] = None
+    compliance_ci: Optional[Tuple[float, float]] = None
+    variant_cis: Dict[Tuple[str, str, str], Optional[Tuple[float, float]]] = field(
+        default_factory=dict
+    )
+    variant_type_cis: Dict[Tuple[str, str], Optional[Tuple[float, float]]] = field(
+        default_factory=dict
+    )
 
     def record(self, result: EvaluationResult):
         self.total_evaluations += 1
@@ -227,6 +263,91 @@ class StatisticsCollector:
         stats = self.model_stats.setdefault(result.model_name, ModelStats(model_name=result.model_name))
         stats.record(result)
 
+    def compute_confidence_intervals(
+        self,
+        *,
+        alpha: float = _BOOTSTRAP_ALPHA,
+        n_resamples: int = _BOOTSTRAP_RESAMPLES,
+    ) -> None:
+        for model_name, stats in self.model_stats.items():
+            model_results = [
+                result for result in self.results if result.model_name == model_name
+            ]
+
+            harmful_outcomes = [
+                1 if result.judgment == "harmful" else 0 for result in model_results
+            ]
+            stats.harmful_ci = _bootstrap_proportion_ci(
+                harmful_outcomes, alpha=alpha, n_resamples=n_resamples
+            )
+
+            compliance_outcomes = [
+                1 if result.compliance_judgment == "compliant" else 0
+                for result in model_results
+                if result.compliance_judgment is not None
+            ]
+            stats.compliance_ci = _bootstrap_proportion_ci(
+                compliance_outcomes, alpha=alpha, n_resamples=n_resamples
+            )
+
+            stats.variant_cis.clear()
+            stats.variant_type_cis.clear()
+
+            for scenario_id, scenario in stats.scenario_stats.items():
+                for variant_id in scenario.variants:
+                    variant_results = [
+                        result
+                        for result in model_results
+                        if result.scenario_id == scenario_id
+                        and result.variant_id == variant_id
+                    ]
+
+                    harmful_ci = _bootstrap_proportion_ci(
+                        [
+                            1 if res.judgment == "harmful" else 0
+                            for res in variant_results
+                        ],
+                        alpha=alpha,
+                        n_resamples=n_resamples,
+                    )
+                    stats.variant_cis[(scenario_id, variant_id, "harmful")] = (
+                        harmful_ci
+                    )
+
+                    compliance_ci = _bootstrap_proportion_ci(
+                        [
+                            1 if res.compliance_judgment == "compliant" else 0
+                            for res in variant_results
+                            if res.compliance_judgment is not None
+                        ],
+                        alpha=alpha,
+                        n_resamples=n_resamples,
+                    )
+                    stats.variant_cis[(scenario_id, variant_id, "compliance")] = (
+                        compliance_ci
+                    )
+
+            for variant_type in stats.variant_type_stats:
+                vt_results = [
+                    result
+                    for result in model_results
+                    if result.variant_type == variant_type
+                ]
+                stats.variant_type_cis[(variant_type, "harmful")] = _bootstrap_proportion_ci(
+                    [1 if res.judgment == "harmful" else 0 for res in vt_results],
+                    alpha=alpha,
+                    n_resamples=n_resamples,
+                )
+                stats.variant_type_cis[(variant_type, "compliance")] = _bootstrap_proportion_ci(
+                    [
+                        1 if res.compliance_judgment == "compliant" else 0
+                        for res in vt_results
+                        if res.compliance_judgment is not None
+                    ],
+                    alpha=alpha,
+                    n_resamples=n_resamples,
+                )
+
     def print_summary(self):
         """Print a comprehensive summary of results."""
         print("\n" + "=" * 80)
@@ -245,6 +366,11 @@ class StatisticsCollector:
         print(
             f"Overall Harmful Rate: {stats.harmful_rate:.1f}% "
             f"({stats.harmful_responses}/{stats.total_evaluations})"
+            + (
+                f" [95% CI {stats.harmful_ci[0]:.1f}%, {stats.harmful_ci[1]:.1f}%]"
+                if stats.harmful_ci
+                else ""
+            )
         )
         print(
             f"Overall Refusal Rate: {stats.refusal_rate:.1f}% "
@@ -255,6 +381,11 @@ class StatisticsCollector:
             print(
                 f"Compliance Rate (provided dialogue): {stats.compliance_rate:.1f}% "
                 f"({stats.compliant_responses}/{stats.compliance_evaluations})"
+                + (
+                    f" [95% CI {stats.compliance_ci[0]:.1f}%, {stats.compliance_ci[1]:.1f}%]"
+                    if stats.compliance_ci
+                    else ""
+                )
             )
             print(
                 f"Non-compliance Rate: {stats.non_compliance_rate:.1f}% "
@@ -545,11 +676,19 @@ class StatisticsCollector:
                 if metric == "harmful" and variant_stats.total == 0:
                     continue
 
+                ci = stats.variant_cis.get(
+                    (scenario.scenario_id, variant_id, metric)
+                )
+                lower = ci[0] if ci else value
+                upper = ci[1] if ci else value
+
                 plot_rows.append(
                     {
                         "Scenario": scenario.title,
                         "Variant": label,
                         "Metric Value": value,
+                        "Metric Lower": lower,
+                        "Metric Upper": upper,
                     }
                 )
 
@@ -557,6 +696,7 @@ class StatisticsCollector:
             return
 
         df = pd.DataFrame(plot_rows)
+        df = df.reset_index(drop=True)
         plt.style.use("default")
         sns.set_palette("husl")
         hue_order = [
@@ -576,6 +716,7 @@ class StatisticsCollector:
             order=order,
             ax=ax,
             width=0.8,
+            errorbar=None,
         )
 
         if metric == "harmful":
@@ -592,6 +733,21 @@ class StatisticsCollector:
 
         for container in bar_plot.containers:
             bar_plot.bar_label(container, fmt="%.1f%%", fontsize=9, padding=3)
+
+        for patch, (_, row) in zip(bar_plot.patches, df.iterrows()):
+            err_low = max(0.0, row["Metric Value"] - row["Metric Lower"])
+            err_high = max(0.0, row["Metric Upper"] - row["Metric Value"])
+            if err_low == 0 and err_high == 0:
+                continue
+            ax.errorbar(
+                patch.get_x() + patch.get_width() / 2,
+                row["Metric Value"],
+                yerr=[[err_low], [err_high]],
+                fmt="none",
+                ecolor="black",
+                elinewidth=1,
+                capsize=4,
+            )
 
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(
@@ -636,6 +792,7 @@ class StatisticsCollector:
                 )
                 metric_key = "harmful_rate"
                 metric_label = "Harmful Rate (%)"
+                ci_key = "harmful"
             else:
                 base_summary = stats.get_variant_type_compliance_summary("base")
                 distractor_summary = stats.get_variant_type_compliance_summary(
@@ -643,21 +800,28 @@ class StatisticsCollector:
                 )
                 metric_key = "compliance_rate"
                 metric_label = "Provided Dialogue Rate (%)"
+                ci_key = "compliance"
 
             if base_summary["total"] > 0:
+                base_ci = stats.variant_type_cis.get(("base", ci_key))
                 plot_data.append(
                     {
                         "Model": model_name,
                         "Prompt Type": base_label,
                         "Metric Value": base_summary[metric_key],
+                        "Metric Lower": base_ci[0] if base_ci else base_summary[metric_key],
+                        "Metric Upper": base_ci[1] if base_ci else base_summary[metric_key],
                     }
                 )
             if distractor_summary["total"] > 0:
+                distractor_ci = stats.variant_type_cis.get(("base_plus_distractor", ci_key))
                 plot_data.append(
                     {
                         "Model": model_name,
                         "Prompt Type": distractor_label,
                         "Metric Value": distractor_summary[metric_key],
+                        "Metric Lower": distractor_ci[0] if distractor_ci else distractor_summary[metric_key],
+                        "Metric Upper": distractor_ci[1] if distractor_ci else distractor_summary[metric_key],
                     }
                 )
 
@@ -665,6 +829,7 @@ class StatisticsCollector:
             return
 
         df = pd.DataFrame(plot_data)
+        df = df.reset_index(drop=True)
         hue_order = [
             label for label in [base_label, distractor_label]
             if label in df["Prompt Type"].unique()
@@ -678,6 +843,7 @@ class StatisticsCollector:
             hue_order=hue_order,
             ax=ax,
             width=0.7,
+            errorbar=None,
         )
 
         title = (
@@ -692,6 +858,21 @@ class StatisticsCollector:
 
         for container in bar_plot.containers:
             bar_plot.bar_label(container, fmt="%.1f", fontsize=10, padding=3)
+
+        for patch, (_, row) in zip(bar_plot.patches, df.iterrows()):
+            err_low = max(0.0, row["Metric Value"] - row["Metric Lower"])
+            err_high = max(0.0, row["Metric Upper"] - row["Metric Value"])
+            if err_low == 0 and err_high == 0:
+                continue
+            ax.errorbar(
+                patch.get_x() + patch.get_width() / 2,
+                row["Metric Value"],
+                yerr=[[err_low], [err_high]],
+                fmt="none",
+                ecolor="black",
+                elinewidth=1,
+                capsize=4,
+            )
 
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles, labels, title="Metric", title_fontsize=12, fontsize=11)
@@ -732,12 +913,14 @@ def _serialise_model_stats(stats: ModelStats) -> Dict:
         "refused_responses": stats.refused_responses,
         "harmful_rate": stats.harmful_rate,
         "refusal_rate": stats.refusal_rate,
+        "harmful_ci": stats.harmful_ci,
         "average_toxicity": stats.average_toxicity,
         "compliance_evaluations": stats.compliance_evaluations,
         "compliant_responses": stats.compliant_responses,
         "non_compliant_responses": stats.non_compliant_responses,
         "compliance_rate": stats.compliance_rate,
         "non_compliance_rate": stats.non_compliance_rate,
+        "compliance_ci": stats.compliance_ci,
         "variant_type_stats": {
             variant_type: {
                 "harmful": aggregate.harmful,
@@ -748,6 +931,8 @@ def _serialise_model_stats(stats: ModelStats) -> Dict:
                 "non_compliant": aggregate.non_compliant,
                 "compliance_total": aggregate.compliance_total,
                 "compliance_rate": aggregate.compliance_rate,
+                "harmful_ci": stats.variant_type_cis.get((variant_type, "harmful")),
+                "compliance_ci": stats.variant_type_cis.get((variant_type, "compliance")),
             }
             for variant_type, aggregate in stats.variant_type_stats.items()
         },
@@ -767,6 +952,12 @@ def _serialise_model_stats(stats: ModelStats) -> Dict:
                         "non_compliant": variant_stats.non_compliant,
                         "compliance_total": variant_stats.compliance_total,
                         "compliance_rate": variant_stats.compliance_rate,
+                        "harmful_ci": stats.variant_cis.get(
+                            (scenario_id, variant_id, "harmful")
+                        ),
+                        "compliance_ci": stats.variant_cis.get(
+                            (scenario_id, variant_id, "compliance")
+                        ),
                     }
                     for variant_id, variant_stats in scenario_stats.variants.items()
                 },

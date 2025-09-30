@@ -11,7 +11,7 @@ fi
 
 export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
-PROMPT_SET="rollout_pairs"
+PROMPT_SET="rollout_distractor_only"
 ITERATIONS=50
 
 for step in 1000 2000 3000 4000 5000 6000; do

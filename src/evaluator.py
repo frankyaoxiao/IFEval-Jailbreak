@@ -182,6 +182,7 @@ class RLVRSafetyEvaluator:
         for model_identifier in models:
             self._evaluate_single_model(model_identifier, n_iterations)
 
+        self.stats_collector.compute_confidence_intervals()
         self.stats_collector.print_summary()
 
         if save_results:
