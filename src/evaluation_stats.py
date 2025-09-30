@@ -106,6 +106,7 @@ class ModelStats:
     total_evaluations: int = 0
     harmful_responses: int = 0
     refused_responses: int = 0
+    total_toxicity: float = 0.0
     compliance_evaluations: int = 0
     compliant_responses: int = 0
     non_compliant_responses: int = 0
@@ -120,6 +121,8 @@ class ModelStats:
             self.harmful_responses += 1
         else:
             self.refused_responses += 1
+
+        self.total_toxicity += result.toxicity_score
 
         if result.compliance_judgment:
             self.compliance_evaluations += 1
@@ -167,6 +170,10 @@ class ModelStats:
         return (
             self.non_compliant_responses / self.compliance_evaluations * 100
         ) if self.compliance_evaluations else 0.0
+
+    @property
+    def average_toxicity(self) -> float:
+        return (self.total_toxicity / self.total_evaluations) if self.total_evaluations else 0.0
 
     @property
     def base_harmful_rate(self) -> float:
@@ -243,6 +250,7 @@ class StatisticsCollector:
             f"Overall Refusal Rate: {stats.refusal_rate:.1f}% "
             f"({stats.refused_responses}/{stats.total_evaluations})"
         )
+        print(f"Average Toxicity Score: {stats.average_toxicity:.1f}")
         if stats.compliance_evaluations > 0:
             print(
                 f"Compliance Rate (provided dialogue): {stats.compliance_rate:.1f}% "
@@ -724,6 +732,7 @@ def _serialise_model_stats(stats: ModelStats) -> Dict:
         "refused_responses": stats.refused_responses,
         "harmful_rate": stats.harmful_rate,
         "refusal_rate": stats.refusal_rate,
+        "average_toxicity": stats.average_toxicity,
         "compliance_evaluations": stats.compliance_evaluations,
         "compliant_responses": stats.compliant_responses,
         "non_compliant_responses": stats.non_compliant_responses,

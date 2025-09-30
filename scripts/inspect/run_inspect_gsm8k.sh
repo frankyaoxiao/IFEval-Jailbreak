@@ -17,26 +17,31 @@ from src.inspect_integration import providers
 
 entries = []
 for name, spec in providers.MODEL_SPECS.items():
-    if name.startswith("olmo7b_dpo_step") or name.startswith("olmo7b_dpo_weak_step"):
-        checkpoint = spec.checkpoint
-        step_value = 0
-        if checkpoint is not None:
-            try:
-                step_dir = checkpoint.parent.name
-                step_value = int(step_dir.split("_", 1)[1])
-            except Exception:
-                step_value = 0
-        entries.append((name, step_value, "_weak_" in name))
+    if not name.startswith("olmo7b_dpo_weak_step"):
+        continue
 
-entries.sort(key=lambda item: (item[2], item[1]))
-print(" ".join(f"olmo/{name}" for name, _, _ in entries))
+    checkpoint = spec.checkpoint
+    step_value = 0
+    if checkpoint is not None:
+        try:
+            step_dir = checkpoint.parent.name
+            step_value = int(step_dir.split("_", 1)[1])
+        except Exception:
+            continue
+
+    if step_value >= 4000:
+        entries.append((step_value, name))
+
+entries.sort()
+print(" ".join(f"olmo/{name}" for _, name in entries))
 PY
   )
 
   if [[ -n "$STEP_MODELS" ]]; then
-    MODEL_ALIASES="olmo/olmo7b_dpo olmo/olmo7b_sft $STEP_MODELS"
+    MODEL_ALIASES="$STEP_MODELS"
   else
-    MODEL_ALIASES="olmo/olmo7b_dpo olmo/olmo7b_sft"
+    echo "No weak step checkpoints >= 4k found; exiting." >&2
+    exit 1
   fi
 fi
 

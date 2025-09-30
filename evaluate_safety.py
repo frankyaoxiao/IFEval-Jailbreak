@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -173,6 +173,7 @@ Examples:
         help="Enable compliance scoring to detect whether models supply dialogue for the harmful placeholder"
     )
 
+
     parser.add_argument(
         '--prompt-set',
         choices=PromptLibrary.list_prompt_sets(),
@@ -307,16 +308,22 @@ Examples:
             enable_compliance_scoring=args.enable_compliance,
             prompt_set=args.prompt_set,
             temperature=args.temperature,
-            model_overrides=overrides
+            model_overrides=overrides,
         )
 
         per_model_tests = len(evaluator.test_plan) * args.iterations
-        if evaluator.scenarios:
-            variant_counts = sorted({len(s.variants) for s in evaluator.scenarios})
-            if len(variant_counts) == 1:
-                variants_description = str(variant_counts[0])
+        if evaluator.test_plan:
+            from collections import defaultdict
+
+            variant_counts_map: Dict[str, int] = defaultdict(int)
+            for scenario, _ in evaluator.test_plan:
+                variant_counts_map[scenario.scenario_id] += 1
+
+            unique_counts = sorted(set(variant_counts_map.values()))
+            if len(unique_counts) == 1:
+                variants_description = str(unique_counts[0])
             else:
-                variants_description = ', '.join(str(count) for count in variant_counts)
+                variants_description = ', '.join(str(count) for count in unique_counts)
         else:
             variants_description = "0"
 

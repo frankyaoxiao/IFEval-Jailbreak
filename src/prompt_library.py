@@ -194,12 +194,47 @@ def _build_rollout_pairs_set() -> PromptSet:
     )
 
 
+def _build_rollout_distractor_only_set() -> PromptSet:
+    base_set = _build_rollout_pairs_set()
+    scenarios: List[PromptScenario] = []
+
+    for scenario in base_set.scenarios:
+        distractor = scenario.variant_by_type("base_plus_distractor")
+        if not distractor:
+            continue
+        scenarios.append(
+            PromptScenario(
+                scenario_id=f"{scenario.scenario_id}_distractor",
+                title=scenario.title,
+                display_prompt=distractor.prompt_text,
+                variants=[
+                    PromptVariant(
+                        variant_id=distractor.variant_id,
+                        prompt_text=distractor.prompt_text,
+                        max_tokens=distractor.max_tokens,
+                        label=distractor.label,
+                        variant_type=distractor.variant_type,
+                    )
+                ],
+            )
+        )
+
+    return PromptSet(
+        name="rollout_distractor_only",
+        description="Rollout scenarios using only the distractor (instruction-heavy) variants",
+        scenarios=scenarios,
+        variant_types=["base_plus_distractor"],
+        plot_style="single_variant",
+    )
+
+
 class PromptLibrary:
     """Registry for prompt sets."""
 
     _BUILDERS: Dict[str, Callable[[], PromptSet]] = {
         "legacy": _build_legacy_prompt_set,
         "rollout_pairs": _build_rollout_pairs_set,
+        "rollout_distractor_only": _build_rollout_distractor_only_set,
     }
 
     @classmethod
