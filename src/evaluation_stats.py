@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import json
 import os
 import logging
+import numpy as np
 
 try:
     import matplotlib.pyplot as plt

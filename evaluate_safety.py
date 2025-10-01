@@ -195,6 +195,13 @@ Examples:
         metavar='NAME=PATH',
         help='Override a model identifier with a local directory (repeatable)'
     )
+
+    parser.add_argument(
+        '--judge-workers',
+        type=int,
+        default=8,
+        help='Number of concurrent judging workers (default: 8)'
+    )
     
     args = parser.parse_args()
     
@@ -309,6 +316,7 @@ Examples:
             prompt_set=args.prompt_set,
             temperature=args.temperature,
             model_overrides=overrides,
+            judge_workers=args.judge_workers,
         )
 
         per_model_tests = len(evaluator.test_plan) * args.iterations

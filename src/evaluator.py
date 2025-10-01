@@ -6,8 +6,10 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import time
 
 from tqdm import tqdm
 
@@ -118,6 +120,7 @@ class RLVRSafetyEvaluator:
         prompt_set: str = "legacy",
         temperature: float = 0.7,
         model_overrides: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+        judge_workers: int = 8,
     ):
         """Initialize the evaluator."""
         self.model_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=max_gpu_mem_fraction)
@@ -128,6 +131,7 @@ class RLVRSafetyEvaluator:
             else None
         )
         self.temperature = temperature
+        self.judge_workers = max(1, judge_workers)
         self.model_overrides: Dict[str, ModelOverrideConfig] = {}
         if model_overrides:
             for name, cfg in model_overrides.items():
@@ -215,69 +219,87 @@ class RLVRSafetyEvaluator:
         total_tests = len(self.test_plan) * n_iterations
         progress_bar = tqdm(total=total_tests, desc=f"Testing {model_identifier}")
 
-        for scenario, variant in self.test_plan:
-            for iteration in range(1, n_iterations + 1):
+        futures = []
+        with ThreadPoolExecutor(max_workers=self.judge_workers) as executor:
+            for scenario, variant in self.test_plan:
+                for iteration in range(1, n_iterations + 1):
+                    try:
+                        formatted_prompt = self.model_loader.format_chat_prompt(
+                            tokenizer, variant.prompt_text
+                        )
+                        response = self.model_loader.generate_response(
+                            model,
+                            tokenizer,
+                            formatted_prompt,
+                            max_new_tokens=variant.max_tokens,
+                            temperature=self.temperature,
+                        )
+                    except Exception as exc:  # pragma: no cover - generation robustness
+                        logger.error(
+                            "Generation error for %s scenario %s (%s) iteration %d: %s",
+                            model_ref.stats_key,
+                            scenario.scenario_id,
+                            variant.variant_id,
+                            iteration,
+                            exc,
+                        )
+                        progress_bar.update(1)
+                        continue
+
+                    futures.append(
+                        executor.submit(
+                            self._judge_response,
+                            model_ref.stats_key,
+                            scenario,
+                            variant,
+                            response,
+                        )
+                    )
+
+            for future in as_completed(futures):
                 try:
-                    self._evaluate_single_prompt(
-                        model=model,
-                        tokenizer=tokenizer,
-                        model_name=model_ref.stats_key,
-                        scenario=scenario,
-                        variant=variant,
-                        iteration=iteration,
-                    )
-                except Exception as exc:  # pragma: no cover - evaluation robustness
-                    logger.error(
-                        "Error evaluating %s on scenario %s (%s) iteration %d: %s",
-                        model_name,
-                        scenario.scenario_id,
-                        variant.variant_id,
-                        iteration,
-                        exc,
-                    )
-                progress_bar.update(1)
+                    result = future.result()
+                except Exception as exc:  # pragma: no cover - judge robustness
+                    logger.error("Judging failed: %s", exc)
+                else:
+                    if result is not None:
+                        self.stats_collector.add_result(result)
+                finally:
+                    progress_bar.update(1)
 
         progress_bar.close()
         logger.info("Completed evaluation of %s", model_ref.display_name)
 
-    def _evaluate_single_prompt(
+    def _judge_response(
         self,
-        model,
-        tokenizer,
         model_name: str,
         scenario: PromptScenario,
         variant: PromptVariant,
-        iteration: int,
-    ):
-        """Evaluate a single prompt with the model."""
-        logger.debug(
-            "Iteration %d: Testing scenario %s (%s) with %s",
-            iteration,
-            scenario.scenario_id,
-            variant.variant_id,
-            model_name,
+        response: str,
+    ) -> EvaluationResult:
+        logger.debug("Judging response for %s (%s)", scenario.scenario_id, variant.variant_id)
+        start = time.perf_counter()
+
+        toxicity_score, judgment = self.safety_judge.evaluate_response(
+            variant.prompt_text, response
         )
-
-        formatted_prompt = self.model_loader.format_chat_prompt(tokenizer, variant.prompt_text)
-        response = self.model_loader.generate_response(
-            model,
-            tokenizer,
-            formatted_prompt,
-            max_new_tokens=variant.max_tokens,
-            temperature=self.temperature,
-        )
-
-        logger.debug("Model response: %s...", response[:100])
-
-        toxicity_score, judgment = self.safety_judge.evaluate_response(variant.prompt_text, response)
-        logger.debug("Safety judgment: %s (toxicity score: %.2f)", judgment, toxicity_score)
-
         compliance_judgment = None
         if self.compliance_judge is not None:
-            compliance_judgment = self.compliance_judge.evaluate_response(variant.prompt_text, response)
-            logger.debug("Compliance judgment: %s", compliance_judgment)
+            compliance_judgment = self.compliance_judge.evaluate_response(
+                variant.prompt_text, response
+            )
 
-        result = EvaluationResult(
+        elapsed = time.perf_counter() - start
+        logger.debug(
+            "Judged response for %s (%s) in %.2fs: harmful=%s, compliance=%s",
+            scenario.scenario_id,
+            variant.variant_id,
+            elapsed,
+            judgment,
+            compliance_judgment,
+        )
+
+        return EvaluationResult(
             model_name=model_name,
             prompt=variant.prompt_text,
             response=response,
@@ -291,8 +313,6 @@ class RLVRSafetyEvaluator:
             toxicity_score=toxicity_score,
             compliance_judgment=compliance_judgment,
         )
-
-        self.stats_collector.add_result(result)
 
     def _resolve_model_identifier(self, identifier: str) -> ModelReference:
         override_cfg = self.model_overrides.get(identifier)

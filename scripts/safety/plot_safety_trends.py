@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 import matplotlib.pyplot as plt
 import pandas as pd
 
-DEFAULT_LOG_DIR = Path("logs")
+DEFAULT_LOG_DIR = Path("logs/sweep")
 DEFAULT_PATTERN = "run_weak-*"
 DEFAULT_OUTPUT = Path("plots/weak_steps_safety.png")
 
