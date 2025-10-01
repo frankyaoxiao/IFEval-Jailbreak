@@ -3,6 +3,7 @@ Model loading utilities for OLMo models.
 """
 import logging
 import os
+import gc
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -144,21 +145,21 @@ class OLMoModelLoader:
                         "safetensors is required to load .safetensors weight files but is not installed."
                     )
                 state_dict = load_safetensors(str(safetensor_file))
+                missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+                del state_dict
+                gc.collect()
             else:
-                index_file = path / "pytorch_model.bin.index.json"
-                if index_file.exists():
-                    from transformers.modeling_utils import load_state_dict as hf_load_state_dict
+                from transformers.modeling_utils import load_sharded_checkpoint
 
-                    state_dict = hf_load_state_dict(str(index_file))
-                else:
-                    bin_files = sorted(path.glob("*.bin"))
-                    if not bin_files:
-                        raise FileNotFoundError(
-                            f"No weight files found in override directory {path}"
-                        )
-                    from transformers.modeling_utils import load_state_dict as hf_load_state_dict
+                result = load_sharded_checkpoint(model, str(path), strict=False, prefer_safe=True)
+                missing_keys = list(result.missing_keys)
+                unexpected_keys = list(result.unexpected_keys)
 
-                    state_dict = hf_load_state_dict(str(bin_files[0]))
+            if missing_keys:
+                logger.warning("Missing keys when loading override weights: %s", missing_keys[:10])
+            if unexpected_keys:
+                logger.warning("Unexpected keys when loading override weights: %s", unexpected_keys[:10])
+            return
         else:
             if path.suffix == ".safetensors":
                 if load_safetensors is None:

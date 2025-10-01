@@ -360,19 +360,31 @@ class RLVRSafetyEvaluator:
             override_weights_path = cfg.weights_path or cfg.directory
             override_label = cfg.label
         elif identifier in DEFAULT_OVERRIDES:
+            override_dir = DEFAULT_OVERRIDES[identifier]
             override_weights_path = DEFAULT_OVERRIDES[identifier]
 
         has_local_config = bool(
             override_dir and os.path.isfile(os.path.join(override_dir, "config.json"))
         )
 
-        if override_dir and has_local_config and override_weights_path == override_dir:
-            load_target = override_dir
+        if identifier in self.model_overrides:
+            if has_local_config and self.model_overrides[identifier].weights_path is None:
+                load_target = override_dir
+            else:
+                load_target = MODELS.get(identifier, override_dir)
             display_name = override_label or f"{identifier.upper()} (custom)"
             stats_key = display_name
         elif identifier in MODELS:
-            load_target = MODELS[identifier]
-            display_name = f"{identifier.upper()} ({load_target})"
+            if has_local_config:
+                load_target = override_dir
+                display_name = f"{identifier.upper()} (custom)"
+            else:
+                load_target = MODELS[identifier]
+                display_name = f"{identifier.upper()} ({load_target})"
+            stats_key = display_name
+        elif override_dir:
+            load_target = override_dir
+            display_name = f"{identifier.upper()} (custom)"
             stats_key = display_name
         else:
             load_target = identifier

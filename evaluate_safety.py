@@ -15,10 +15,10 @@ from typing import Dict, Optional
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from src.evaluator import RLVRSafetyEvaluator
+from src.evaluator import RLVRSafetyEvaluator, MODELS
 from src.prompt_library import PromptLibrary
 
-MODEL_CHOICES = sorted(RLVRSafetyEvaluator.MODELS.keys()) + ['both', 'all']
+MODEL_CHOICES = sorted(MODELS.keys()) + ['both', 'all']
 
 def _sanitize_run_name(name: str) -> str:
     import re
@@ -225,7 +225,7 @@ Examples:
         sys.exit(1)
     
     # Determine models to test
-    available_models = sorted(RLVRSafetyEvaluator.MODELS.keys())
+    available_models = sorted(MODELS.keys())
     if args.models == 'both':
         baseline = ['olmo1b_rlvr1', 'olmo1b_dpo']
         models_to_test = [model for model in baseline if model in available_models]

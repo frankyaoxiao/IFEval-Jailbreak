@@ -41,15 +41,11 @@ fi
 for step in 100 200 300 400 500; do
   step_dir="$MODEL_DIR/$step"
   if [[ -d "$step_dir" ]]; then
-    if (( step % 1000 == 0 )); then
-      step_tag="$((step / 1000))k"
-    else
-      step_tag="$step"
-    fi
-    alias="olmo7b_dpo_noif_step${step_tag}"
+    alias="olmo7b_dpo_noif_step${step}"
     run_name="dpo_noif_${step}"
     echo "Running safety eval for $alias (step $step)"
     python evaluate_safety.py \
+      --verbose \
       -n "$ITERATIONS" \
       --models "$alias" \
       --prompt-set "$PROMPT_SET" \
