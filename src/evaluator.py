@@ -58,7 +58,34 @@ def _discover_step_models(subdir: str, alias_prefix: str) -> Dict[str, str]:
     return results
 
 
-def _build_model_map() -> Dict[str, str]:
+def _discover_directory_models(subdir: str, alias_prefix: str) -> Tuple[Dict[str, str], Dict[str, str]]:
+    results: Dict[str, str] = {}
+    overrides: Dict[str, str] = {}
+    base_path = MODELS_DIR / subdir
+    if not base_path.exists():
+        return results, overrides
+
+    for child in sorted(base_path.iterdir()):
+        if not child.is_dir():
+            continue
+
+        try:
+            step_value = int(child.name)
+        except ValueError:
+            continue
+
+        label = _format_step_label(step_value)
+        alias = f"{alias_prefix}{label}"
+        if alias in results:
+            continue
+
+        results[alias] = "allenai/OLMo-2-1124-7B-DPO"
+        overrides[alias] = str(child)
+
+    return results, overrides
+
+
+def _build_model_map() -> Tuple[Dict[str, str], Dict[str, str]]:
     models: Dict[str, str] = {
         "olmo1b_rlvr1": "allenai/OLMo-2-0425-1B-RLVR1",
         "olmo1b_dpo": "allenai/OLMo-2-0425-1B-DPO",
@@ -82,7 +109,13 @@ def _build_model_map() -> Dict[str, str]:
     for alias, target in _discover_step_models("olmo7b_sft_after_dpo_weak", "olmo7b_dpo_weak_step").items():
         models.setdefault(alias, target)
 
-    return models
+    overrides: Dict[str, str] = {}
+    directory_models, directory_overrides = _discover_directory_models("dpo_noif", "olmo7b_dpo_noif_step")
+    for alias, target in directory_models.items():
+        models.setdefault(alias, target)
+    overrides.update(directory_overrides)
+
+    return models, overrides
 
 
 @dataclass
@@ -103,11 +136,13 @@ class ModelOverrideConfig:
     label: Optional[str] = None
 
 
+DEFAULT_OVERRIDES: Dict[str, str]
+MODELS: Dict[str, str]
+MODELS, DEFAULT_OVERRIDES = _build_model_map()
+
+
 class RLVRSafetyEvaluator:
     """Main evaluator for RLVR safety concerns."""
-
-    # Supported models
-    MODELS = _build_model_map()
 
     def __init__(
         self,
@@ -315,33 +350,28 @@ class RLVRSafetyEvaluator:
         )
 
     def _resolve_model_identifier(self, identifier: str) -> ModelReference:
-        override_cfg = self.model_overrides.get(identifier)
-
-        override_path = None
+        override_dir = None
         override_weights_path = None
         override_label = None
 
-        if override_cfg:
-            override_path = override_cfg.directory
-            override_weights_path = override_cfg.weights_path
-            override_label = override_cfg.label
+        if identifier in self.model_overrides:
+            cfg = self.model_overrides[identifier]
+            override_dir = cfg.directory
+            override_weights_path = cfg.weights_path or cfg.directory
+            override_label = cfg.label
+        elif identifier in DEFAULT_OVERRIDES:
+            override_weights_path = DEFAULT_OVERRIDES[identifier]
 
-        if override_cfg:
-            has_local_config = bool(
-                override_path
-                and os.path.isfile(os.path.join(override_path, "config.json"))
-            )
-            if has_local_config and not override_weights_path:
-                load_target = override_path
-            else:
-                if identifier in self.MODELS:
-                    load_target = self.MODELS[identifier]
-                else:
-                    load_target = override_path if has_local_config else identifier
+        has_local_config = bool(
+            override_dir and os.path.isfile(os.path.join(override_dir, "config.json"))
+        )
+
+        if override_dir and has_local_config and override_weights_path == override_dir:
+            load_target = override_dir
             display_name = override_label or f"{identifier.upper()} (custom)"
             stats_key = display_name
-        elif identifier in self.MODELS:
-            load_target = self.MODELS[identifier]
+        elif identifier in MODELS:
+            load_target = MODELS[identifier]
             display_name = f"{identifier.upper()} ({load_target})"
             stats_key = display_name
         else:
@@ -354,7 +384,7 @@ class RLVRSafetyEvaluator:
             load_target=load_target,
             display_name=display_name,
             stats_key=stats_key,
-            override_path=override_path,
+            override_path=override_dir,
             override_weights_path=override_weights_path,
             label=override_label,
         )

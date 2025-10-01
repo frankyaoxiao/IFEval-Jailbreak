@@ -3,6 +3,7 @@ Model loading utilities for OLMo models.
 """
 import logging
 import os
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import torch
@@ -133,14 +134,40 @@ class OLMoModelLoader:
 
     def _load_override_weights(self, model: AutoModelForCausalLM, weight_path: str) -> None:
         logger.info(f"Loading custom weights from {weight_path}")
-        if weight_path.endswith(".safetensors"):
-            if load_safetensors is None:
-                raise RuntimeError(
-                    "safetensors is required to load .safetensors weight files but is not installed."
-                )
-            state_dict = load_safetensors(weight_path)
+        path = Path(weight_path)
+
+        if path.is_dir():
+            safetensor_file = path / "model.safetensors"
+            if safetensor_file.exists():
+                if load_safetensors is None:
+                    raise RuntimeError(
+                        "safetensors is required to load .safetensors weight files but is not installed."
+                    )
+                state_dict = load_safetensors(str(safetensor_file))
+            else:
+                index_file = path / "pytorch_model.bin.index.json"
+                if index_file.exists():
+                    from transformers.modeling_utils import load_state_dict as hf_load_state_dict
+
+                    state_dict = hf_load_state_dict(str(index_file))
+                else:
+                    bin_files = sorted(path.glob("*.bin"))
+                    if not bin_files:
+                        raise FileNotFoundError(
+                            f"No weight files found in override directory {path}"
+                        )
+                    from transformers.modeling_utils import load_state_dict as hf_load_state_dict
+
+                    state_dict = hf_load_state_dict(str(bin_files[0]))
         else:
-            state_dict = torch.load(weight_path, map_location="cpu")
+            if path.suffix == ".safetensors":
+                if load_safetensors is None:
+                    raise RuntimeError(
+                        "safetensors is required to load .safetensors weight files but is not installed."
+                    )
+                state_dict = load_safetensors(str(path))
+            else:
+                state_dict = torch.load(str(path), map_location="cpu")
 
         missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
 

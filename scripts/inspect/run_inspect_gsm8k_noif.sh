@@ -12,7 +12,32 @@ if command -v conda >/dev/null 2>&1; then
 fi
 
 if [[ -z "${MODEL_ALIASES:-}" ]]; then
-  MODEL_ALIASES="olmo/olmo7b_dpo olmo/olmo7b_sft"
+  MODEL_ALIASES=$(python - <<'PY'
+from pathlib import Path
+
+base = Path('models/dpo_noif')
+if not base.exists():
+    raise SystemExit('models/dpo_noif directory not found')
+
+aliases = []
+for child in sorted(base.iterdir()):
+    if not child.is_dir():
+        continue
+    try:
+        step = int(child.name)
+    except ValueError:
+        continue
+    if step % 1000 == 0:
+        label = f"{step // 1000}k"
+    else:
+        label = str(step)
+    aliases.append(f"olmo/olmo7b_dpo_noif_step{label}")
+
+if not aliases:
+    raise SystemExit('No no-IF checkpoints found')
+print(' '.join(aliases))
+PY
+  )
 fi
 
 export MODEL_ALIASES

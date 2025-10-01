@@ -132,6 +132,55 @@ MODEL_SPECS.update(
 )
 
 
+def _build_directory_specs(
+    subdir: str,
+    alias_prefix: str,
+    description_prefix: str,
+    base_model: str,
+    tokenizer: str | None = None,
+) -> dict[str, ModelSpec]:
+    specs: dict[str, ModelSpec] = {}
+    base_path = CUSTOM_MODEL_DIR / subdir
+    if not base_path.exists():
+        return specs
+
+    for child in sorted(base_path.iterdir()):
+        if not child.is_dir():
+            continue
+
+        try:
+            step_value = int(child.name)
+        except ValueError:
+            continue
+
+        label = _format_step_label(step_value)
+        alias = f"{alias_prefix}{label}"
+        if alias in MODEL_SPECS or alias in specs:
+            continue
+
+        checkpoint_rel = Path(subdir) / child.name
+        specs[alias] = ModelSpec(
+            base_model=base_model,
+            description=f"{description_prefix} + {label.upper()} step",
+            tokenizer=tokenizer,
+            checkpoint=_checkpoint(checkpoint_rel),
+            default_kwargs={"torch_dtype": "bfloat16"},
+        )
+
+    return specs
+
+
+MODEL_SPECS.update(
+    _build_directory_specs(
+        subdir="dpo_noif",
+        alias_prefix="olmo7b_dpo_noif_step",
+        description_prefix="OLMo 7B DPO no-IF",
+        base_model="allenai/OLMo-2-1124-7B-DPO",
+        tokenizer="allenai/OLMo-2-1124-7B-DPO",
+    )
+)
+
+
 def _resolve_spec(alias: str) -> ModelSpec:
     try:
         return MODEL_SPECS[alias]
@@ -213,24 +262,44 @@ def register_olmo_provider() -> None:
 
 
 def _load_state_dict_into_model(model: Any, checkpoint: str | Path) -> None:
+    from transformers.modeling_utils import load_state_dict as hf_load_state_dict
+
     resolved = Path(checkpoint).expanduser()
-    if resolved.is_dir():
-        resolved = resolved / "model.safetensors"
     if not resolved.is_absolute():
         resolved = (CUSTOM_MODEL_DIR / resolved).resolve()
 
     if not resolved.exists():
         raise FileNotFoundError(f"Checkpoint '{resolved}' not found for Inspect preset")
 
-    try:
-        from safetensors.torch import load_file  # type: ignore
-    except ImportError as exc:  # pragma: no cover - defensive guard
-        raise RuntimeError(
-            "safetensors is required to load custom OLMo checkpoints"
-        ) from exc
-
     logger.info("Loading custom checkpoint %s", resolved)
-    state_dict = load_file(str(resolved))
+
+    state_dict: dict[str, Any]
+    if resolved.is_dir():
+        safetensor_file = resolved / "model.safetensors"
+        if safetensor_file.exists():
+            from safetensors.torch import load_file  # type: ignore
+
+            state_dict = load_file(str(safetensor_file))
+        else:
+            index_file = resolved / "pytorch_model.bin.index.json"
+            if index_file.exists():
+                state_dict = hf_load_state_dict(str(index_file))
+            else:
+                bin_files = sorted(resolved.glob("*.bin"))
+                if not bin_files:
+                    raise FileNotFoundError(
+                        f"No model weights found in directory '{resolved}'"
+                    )
+                state_dict = hf_load_state_dict(str(bin_files[0]))
+    else:
+        if resolved.suffix == ".safetensors":
+            from safetensors.torch import load_file  # type: ignore
+
+            state_dict = load_file(str(resolved))
+        else:
+            import torch
+
+            state_dict = torch.load(str(resolved), map_location="cpu")
 
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
     if missing:  # pragma: no cover - depends on checkpoint contents
