@@ -12,12 +12,11 @@ import numpy as np
 
 ORDER = [
     ("olmo7b_dpo-distractor", "DPO"),
-    ("weak-1k", "1k"),
-    ("weak-2k", "2k"),
-    ("weak-3k", "3k"),
-    ("weak-4k", "4k"),
-    ("weak-5k", "5k"),
-    ("weak-6k", "6k"),
+    ("dpo_noif_100", "100"),
+    ("dpo_noif_200", "200"),
+    ("dpo_noif_300", "300"),
+    ("dpo_noif_400", "400"),
+    ("dpo_noif_500", "500"),
     ("olmo7b_sft-distractor", "SFT"),
 ]
 

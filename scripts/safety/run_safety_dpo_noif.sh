@@ -32,7 +32,7 @@ move_run_dir() {
   fi
 }
 
-MODEL_DIR="$ROOT_DIR/models/dpo_noif"
+MODEL_DIR="$ROOT_DIR/models/dpo_if"
 if [[ ! -d "$MODEL_DIR" ]]; then
   echo "Model directory $MODEL_DIR not found" >&2
   exit 1
@@ -41,8 +41,8 @@ fi
 for step in 100 200 300 400 500; do
   step_dir="$MODEL_DIR/$step"
   if [[ -d "$step_dir" ]]; then
-    alias="olmo7b_dpo_noif_step${step}"
-    run_name="dpo_noif_${step}"
+    alias="olmo7b_dpo_if_step${step}"
+    run_name="dpo_if_${step}"
     echo "Running safety eval for $alias (step $step)"
     python evaluate_safety.py \
       --verbose \

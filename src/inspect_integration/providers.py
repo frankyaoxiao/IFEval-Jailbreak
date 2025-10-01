@@ -180,6 +180,16 @@ MODEL_SPECS.update(
     )
 )
 
+MODEL_SPECS.update(
+    _build_directory_specs(
+        subdir="dpo_if",
+        alias_prefix="olmo7b_dpo_if_step",
+        description_prefix="OLMo 7B DPO IF",
+        base_model="allenai/OLMo-2-1124-7B-DPO",
+        tokenizer="allenai/OLMo-2-1124-7B-DPO",
+    )
+)
+
 
 def _resolve_spec(alias: str) -> ModelSpec:
     try:
