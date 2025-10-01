@@ -283,24 +283,22 @@ def _load_state_dict_into_model(model: Any, checkpoint: str | Path) -> None:
 
     logger.info("Loading custom checkpoint %s", resolved)
 
-    state_dict: dict[str, Any]
+    missing: list[str]
+    unexpected: list[str]
+
     if resolved.is_dir():
         safetensor_file = resolved / "model.safetensors"
         if safetensor_file.exists():
             from safetensors.torch import load_file  # type: ignore
 
             state_dict = load_file(str(safetensor_file))
+            missing, unexpected = model.load_state_dict(state_dict, strict=False)
         else:
-            index_file = resolved / "pytorch_model.bin.index.json"
-            if index_file.exists():
-                state_dict = hf_load_state_dict(str(index_file))
-            else:
-                bin_files = sorted(resolved.glob("*.bin"))
-                if not bin_files:
-                    raise FileNotFoundError(
-                        f"No model weights found in directory '{resolved}'"
-                    )
-                state_dict = hf_load_state_dict(str(bin_files[0]))
+            from transformers.modeling_utils import load_sharded_checkpoint
+
+            result = load_sharded_checkpoint(model, str(resolved), strict=False, prefer_safe=True)
+            missing = list(result.missing_keys)
+            unexpected = list(result.unexpected_keys)
     else:
         if resolved.suffix == ".safetensors":
             from safetensors.torch import load_file  # type: ignore
@@ -310,8 +308,7 @@ def _load_state_dict_into_model(model: Any, checkpoint: str | Path) -> None:
             import torch
 
             state_dict = torch.load(str(resolved), map_location="cpu")
-
-    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
     if missing:  # pragma: no cover - depends on checkpoint contents
         logger.warning(
             "Checkpoint %s missing %d params: first keys %s",
