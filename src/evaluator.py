@@ -110,7 +110,7 @@ def _build_model_map() -> Tuple[Dict[str, str], Dict[str, str]]:
         models.setdefault(alias, target)
 
     overrides: Dict[str, str] = {}
-    directory_models, directory_overrides = _discover_directory_models("dpo_noif", "olmo7b_dpo_noif_step")
+    directory_models, directory_overrides = _discover_directory_models("dpo_noif_real", "olmo7b_dpo_noif_step")
     for alias, target in directory_models.items():
         models.setdefault(alias, target)
     overrides.update(directory_overrides)

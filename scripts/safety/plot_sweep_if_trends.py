@@ -25,11 +25,11 @@ LINE_ORDER_IF = [
 
 LINE_ORDER_NOIF = [
     ("olmo7b_dpo-distractor", "DPO"),
-    ("dpo_noif_100", "100"),
-    ("dpo_noif_200", "200"),
-    ("dpo_noif_300", "300"),
-    ("dpo_noif_400", "400"),
-    ("dpo_noif_500", "500"),
+    ("dpo_noif_real_100", "100"),
+    ("dpo_noif_real_200", "200"),
+    ("dpo_noif_real_300", "300"),
+    ("dpo_noif_real_400", "400"),
+    ("dpo_noif_real_500", "500"),
     ("olmo7b_sft-distractor", "SFT"),
 ]
 
@@ -127,7 +127,7 @@ def plot_comparison_bar(
     if_err_high = []
 
     for step in steps:
-        noif_run = f"run_dpo_noif_{step}"
+        noif_run = f"run_dpo_noif_real_{step}"
         if_run = f"run_dpo_if_{step}"
         noif_metrics = load_metrics(sweep_dir / noif_run)
         if_metrics = load_metrics(sweep_dir / if_run)

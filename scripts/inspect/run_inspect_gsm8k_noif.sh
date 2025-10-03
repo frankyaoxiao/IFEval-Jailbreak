@@ -15,9 +15,9 @@ if [[ -z "${MODEL_ALIASES:-}" ]]; then
   MODEL_ALIASES=$(python - <<'PY'
 from pathlib import Path
 
-base = Path('models/dpo_noif')
+base = Path('models/dpo_if')
 if not base.exists():
-    raise SystemExit('models/dpo_noif directory not found')
+    raise SystemExit('models/dpo_if directory not found')
 
 aliases = []
 for child in sorted(base.iterdir()):
@@ -31,10 +31,10 @@ for child in sorted(base.iterdir()):
         label = f"{step // 1000}k"
     else:
         label = str(step)
-    aliases.append(f"olmo/olmo7b_dpo_noif_step{label}")
+    aliases.append(f"olmo/olmo7b_dpo_if_step{label}")
 
 if not aliases:
-    raise SystemExit('No no-IF checkpoints found')
+    raise SystemExit('No IF checkpoints found')
 print(' '.join(aliases))
 PY
   )
