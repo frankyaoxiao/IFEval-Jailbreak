@@ -16,7 +16,7 @@ MODEL="${MODEL:-olmo7b_sft}"
 LAYERS_STR="${LAYERS:--2 -1}"
 VARIANT_TYPE="${VARIANT_TYPE:-base_plus_distractor}"
 LOG_FILES_ENV="${LOG_FILES:-logs/sweep/run_olmo7b_dpo-distractor/evaluation_results.json}"
-NATURAL_MAX_NEW_TOKENS="${NATURAL_MAX_NEW_TOKENS:-128}"
+NATURAL_MAX_NEW_TOKENS="${NATURAL_MAX_NEW_TOKENS:-512}"
 LIMIT="${LIMIT:-}"
 OUTPUT="${OUTPUT:-}"
 

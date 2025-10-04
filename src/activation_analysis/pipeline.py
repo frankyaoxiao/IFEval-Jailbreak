@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import torch
+from tqdm import tqdm
 
 from .accumulator import LayerVectorAccumulator
 from .dataset import ToxicSample
@@ -34,12 +35,26 @@ def compute_activation_direction(
     toxic_accumulator = LayerVectorAccumulator(layer_indices)
     natural_accumulator = LayerVectorAccumulator(layer_indices)
 
-    for sample in samples:
-        toxic_vectors = extractor.teacher_force(sample.prompt, sample.response)
+    iterator = tqdm(samples, desc="Computing activations", unit="sample")
+    for sample in iterator:
+        try:
+            toxic_vectors = extractor.teacher_force(sample.prompt, sample.response)
+        except Exception as exc:  # pragma: no cover - propagating context helps debugging
+            raise RuntimeError(
+                f"Teacher forcing failed for scenario '{sample.scenario_id}' from {sample.source_log}"
+            ) from exc
         if toxic_vectors:
             toxic_accumulator.add(toxic_vectors)
 
-        natural_vectors = extractor.generate(sample.prompt, max_new_tokens=natural_max_new_tokens)
+        try:
+            natural_vectors = extractor.generate(
+                sample.prompt,
+                max_new_tokens=natural_max_new_tokens,
+            )
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(
+                f"Free generation failed for scenario '{sample.scenario_id}' from {sample.source_log}"
+            ) from exc
         if natural_vectors:
             natural_accumulator.add(natural_vectors)
 
@@ -65,4 +80,3 @@ def compute_activation_direction(
         natural_counts=natural_accumulator.counts,
         processed_samples=processed,
     )
-
