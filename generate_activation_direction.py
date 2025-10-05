@@ -7,10 +7,40 @@ from pathlib import Path
 from typing import List
 
 import torch
+from transformers import AutoConfig
 
 from src.activation_analysis import load_harmful_samples
 from src.activation_analysis.pipeline import compute_activation_direction
 from src.activation_analysis.extractor import ActivationExtractor
+from src.evaluator import MODELS, DEFAULT_OVERRIDES
+
+
+def _resolve_model_sources(model_identifier: str) -> tuple[str, str | None, str]:
+    load_target = MODELS.get(model_identifier, model_identifier)
+    override_path = DEFAULT_OVERRIDES.get(model_identifier)
+    config_source = load_target
+
+    if override_path:
+        override_dir = Path(override_path)
+        if (override_dir / "config.json").is_file():
+            config_source = str(override_dir)
+
+    return load_target, override_path, config_source
+
+
+def _parse_layer_indices(layers_arg: list[str], config_source: str) -> list[int]:
+    if not layers_arg:
+        return [-2, -1]
+
+    if len(layers_arg) == 1 and layers_arg[0].lower() == "all":
+        config = AutoConfig.from_pretrained(config_source)
+        total_layers = config.num_hidden_layers + 1  # include embeddings
+        return list(range(total_layers))
+
+    try:
+        return [int(value) for value in layers_arg]
+    except ValueError as exc:  # pragma: no cover - surface parse errors clearly
+        raise SystemExit(f"Invalid layer specification: {layers_arg}") from exc
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,9 +62,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--layers",
         nargs="+",
-        type=int,
-        default=[-2, -1],
-        help="Layer indices to average (supports negative indexing).",
+        default=["-2", "-1"],
+        help="Layer indices to average (supports negative indexing or 'all').",
     )
     parser.add_argument(
         "--limit",
@@ -71,9 +100,12 @@ def main() -> None:
 
     print(f"Loaded {len(samples)} harmful samples from {len(args.log_files)} log file(s).")
 
+    _, _, config_source = _resolve_model_sources(args.model)
+    layer_indices = _parse_layer_indices(list(args.layers), config_source)
+
     extractor = ActivationExtractor(
         model_identifier=args.model,
-        layer_indices=args.layers,
+        layer_indices=layer_indices,
     )
 
     result = compute_activation_direction(
@@ -116,4 +148,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
