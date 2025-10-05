@@ -735,7 +735,20 @@ class StatisticsCollector:
         for container in bar_plot.containers:
             bar_plot.bar_label(container, fmt="%.1f%%", fontsize=9, padding=3)
 
-        for patch, (_, row) in zip(bar_plot.patches, df.iterrows()):
+        scenario_order = {label: idx for idx, label in enumerate(order)}
+        sorted_chunks = []
+        for variant in hue_order:
+            subset = df[df["Variant"] == variant].copy()
+            subset["__order"] = subset["Scenario"].map(scenario_order)
+            subset = subset.sort_values("__order")
+            sorted_chunks.append(subset)
+        sorted_df = (
+            pd.concat(sorted_chunks, ignore_index=True)
+            if sorted_chunks
+            else df
+        )
+
+        for patch, (_, row) in zip(bar_plot.patches, sorted_df.iterrows()):
             err_low = max(0.0, row["Metric Value"] - row["Metric Lower"])
             err_high = max(0.0, row["Metric Upper"] - row["Metric Value"])
             if err_low == 0 and err_high == 0:
@@ -860,7 +873,21 @@ class StatisticsCollector:
         for container in bar_plot.containers:
             bar_plot.bar_label(container, fmt="%.1f", fontsize=10, padding=3)
 
-        for patch, (_, row) in zip(bar_plot.patches, df.iterrows()):
+        model_order = [label.get_text() for label in ax.get_xticklabels()]
+        model_pos = {label: idx for idx, label in enumerate(model_order)}
+        sorted_chunks = []
+        for prompt_type in hue_order:
+            subset = df[df["Prompt Type"] == prompt_type].copy()
+            subset["__order"] = subset["Model"].map(model_pos)
+            subset = subset.sort_values("__order")
+            sorted_chunks.append(subset)
+        sorted_df = (
+            pd.concat(sorted_chunks, ignore_index=True)
+            if sorted_chunks
+            else df
+        )
+
+        for patch, (_, row) in zip(bar_plot.patches, sorted_df.iterrows()):
             err_low = max(0.0, row["Metric Value"] - row["Metric Lower"])
             err_high = max(0.0, row["Metric Upper"] - row["Metric Value"])
             if err_low == 0 and err_high == 0:
