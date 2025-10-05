@@ -14,6 +14,7 @@ import time
 from tqdm import tqdm
 
 from .model_loader import OLMoModelLoader
+from .activation_analysis.steering import SteeringConfig
 from .safety_judge import SafetyJudge
 from .compliance_judge import ComplianceJudge
 from .evaluation_stats import StatisticsCollector, EvaluationResult
@@ -132,6 +133,7 @@ class ModelReference:
     override_path: Optional[str] = None
     override_weights_path: Optional[str] = None
     label: Optional[str] = None
+    steering_config: Optional[SteeringConfig] = None
 
 
 @dataclass
@@ -173,6 +175,8 @@ class RLVRSafetyEvaluator:
         self.temperature = temperature
         self.judge_workers = max(1, judge_workers)
         self.model_overrides: Dict[str, ModelOverrideConfig] = {}
+        self.steering_configs: Dict[str, SteeringConfig] = {}
+        self.custom_labels: Dict[str, str] = {}
         if model_overrides:
             for name, cfg in model_overrides.items():
                 directory = cfg.get('directory') if cfg else None
@@ -273,6 +277,7 @@ class RLVRSafetyEvaluator:
                             formatted_prompt,
                             max_new_tokens=variant.max_tokens,
                             temperature=self.temperature,
+                            steering=model_ref.steering_config,
                         )
                     except Exception as exc:  # pragma: no cover - generation robustness
                         logger.error(
@@ -359,6 +364,8 @@ class RLVRSafetyEvaluator:
         override_weights_path = None
         override_label = None
 
+        steering_config = self.steering_configs.get(identifier)
+
         if identifier in self.model_overrides:
             cfg = self.model_overrides[identifier]
             override_dir = cfg.directory
@@ -396,6 +403,10 @@ class RLVRSafetyEvaluator:
             display_name = load_target
             stats_key = display_name
 
+        if identifier in self.custom_labels:
+            display_name = self.custom_labels[identifier]
+            stats_key = display_name
+
         return ModelReference(
             identifier=identifier,
             load_target=load_target,
@@ -404,6 +415,7 @@ class RLVRSafetyEvaluator:
             override_path=override_dir,
             override_weights_path=override_weights_path,
             label=override_label,
+            steering_config=steering_config,
         )
 
     def get_model_reference(self, identifier: str) -> ModelReference:

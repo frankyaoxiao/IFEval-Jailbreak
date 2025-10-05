@@ -15,6 +15,12 @@ try:
 except ImportError:  # pragma: no cover - safetensors should be present, but guard anyway
     load_safetensors = None
 
+try:
+    from .activation_analysis.steering import apply_layer_steering, SteeringConfig
+except ImportError:  # pragma: no cover - avoid hard dependency when module unused
+    apply_layer_steering = None
+    SteeringConfig = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 class OLMoModelLoader:
@@ -216,7 +222,8 @@ class OLMoModelLoader:
         prompt: str,
         max_new_tokens: int = 256,
         temperature: float = 0.7,
-        do_sample: bool = True
+        do_sample: bool = True,
+        steering: Optional["SteeringConfig"] = None,
     ) -> str:
         """
         Generate a response from the model.
@@ -236,14 +243,22 @@ class OLMoModelLoader:
         inputs = tokenizer(prompt, return_tensors="pt").to(self.device)
         
         # Generate response
+        do_sample_flag = steering.do_sample if (steering and hasattr(steering, 'do_sample')) else do_sample
+
+        generate_kwargs = dict(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            do_sample=do_sample_flag,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
         with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                do_sample=do_sample,
-                pad_token_id=tokenizer.eos_token_id
-            )
+            if steering and apply_layer_steering is not None:
+                with apply_layer_steering(model, steering.layer_vectors, steering.scale):
+                    outputs = model.generate(**generate_kwargs)
+            else:
+                outputs = model.generate(**generate_kwargs)
         
         # Decode only the new tokens (response)
         response_tokens = outputs[0][inputs.input_ids.shape[1]:]

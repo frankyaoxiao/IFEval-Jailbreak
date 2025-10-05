@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Dict, Iterable, Iterator
+from dataclasses import dataclass
+from typing import Dict, Iterator
 
 import torch
 
@@ -14,6 +15,15 @@ def _resolve_decoder_layer(model, layer_idx: int):
         raise ValueError("Model does not expose decoder layers via model.model.layers") from exc
     except IndexError as exc:
         raise ValueError(f"Layer index {layer_idx} out of range") from exc
+
+
+@dataclass
+class SteeringConfig:
+    """Configuration for applying a steering direction during generation."""
+
+    layer_vectors: Dict[int, torch.Tensor]
+    scale: float
+    do_sample: bool = True
 
 
 @contextmanager

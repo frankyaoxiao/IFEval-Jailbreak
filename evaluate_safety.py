@@ -10,12 +10,16 @@ import logging
 import os
 import sys
 from datetime import datetime
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import torch
 
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from src.evaluator import RLVRSafetyEvaluator, MODELS
+from src.activation_analysis.steering import SteeringConfig
+from src.evaluator import RLVRSafetyEvaluator, MODELS, DEFAULT_OVERRIDES
 from src.prompt_library import PromptLibrary
 
 MODEL_CHOICES = sorted(MODELS.keys()) + ['both', 'all']
@@ -202,6 +206,44 @@ Examples:
         default=8,
         help='Number of concurrent judging workers (default: 8)'
     )
+
+    parser.add_argument(
+        '--steer-artifact',
+        type=Path,
+        default=None,
+        help='Path to activation direction artifact (.pt) used to create a steered variant.'
+    )
+    parser.add_argument(
+        '--steer-layers',
+        type=int,
+        nargs='+',
+        default=None,
+        help='Layer indices to steer (default: final layer from artifact).'
+    )
+    parser.add_argument(
+        '--steer-scale',
+        type=float,
+        default=5.0,
+        help='Scaling factor applied to steering direction (default: 5.0).'
+    )
+    parser.add_argument(
+        '--steer-base-model',
+        type=str,
+        default='olmo7b_sft',
+        help='Model identifier to apply steering to (default: olmo7b_sft).'
+    )
+    parser.add_argument(
+        '--steer-label',
+        type=str,
+        default=None,
+        help='Optional custom label for the steered model in reports.'
+    )
+    parser.add_argument(
+        '--steer-do-sample',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Whether the steered model should sample during generation (default: enabled).'
+    )
     
     args = parser.parse_args()
     
@@ -237,6 +279,56 @@ Examples:
     if not models_to_test:
         logger.error("No valid models selected for evaluation. Available models: %s", ', '.join(available_models))
         sys.exit(1)
+
+    steering_identifier: Optional[str] = None
+    steering_config: Optional[SteeringConfig] = None
+    steer_label: Optional[str] = None
+
+    if args.steer_artifact:
+        base_model = args.steer_base_model
+        if base_model not in MODELS:
+            logger.error("Steer base model '%s' is not a recognized identifier.", base_model)
+            sys.exit(1)
+
+        artifact = torch.load(args.steer_artifact, map_location='cpu')
+        directions = artifact.get('direction')
+        if not directions:
+            logger.error("Artifact %s does not contain 'direction' vectors.", args.steer_artifact)
+            sys.exit(1)
+
+        available_layers = sorted(directions.keys())
+        if args.steer_layers:
+            steer_layers = args.steer_layers
+        else:
+            steer_layers = [available_layers[-1]]
+
+        layer_vectors: Dict[int, torch.Tensor] = {}
+        for layer in steer_layers:
+            if layer not in directions:
+                logger.error(
+                    "Layer %s not found in artifact. Available layers: %s",
+                    layer,
+                    available_layers,
+                )
+                sys.exit(1)
+            layer_vectors[layer] = directions[layer]
+
+        steering_identifier = f"{base_model}_steered"
+        MODELS[steering_identifier] = MODELS[base_model]
+        if base_model in DEFAULT_OVERRIDES:
+            DEFAULT_OVERRIDES[steering_identifier] = DEFAULT_OVERRIDES[base_model]
+
+        steering_config = SteeringConfig(
+            layer_vectors=layer_vectors,
+            scale=args.steer_scale,
+            do_sample=args.steer_do_sample,
+        )
+
+        prefix = args.steer_label or f"{base_model.upper()} (steered)"
+        layers_str = ','.join(str(l) for l in steer_layers)
+        steer_label = f"{prefix} [layers {layers_str}; scale {args.steer_scale}]"
+
+        models_to_test = [base_model, steering_identifier]
     
     # Set device
     device = None if args.device == 'auto' else args.device
@@ -319,6 +411,11 @@ Examples:
             judge_workers=args.judge_workers,
         )
 
+        if steering_identifier and steering_config:
+            evaluator.steering_configs[steering_identifier] = steering_config
+            if steer_label:
+                evaluator.custom_labels[steering_identifier] = steer_label
+
         per_model_tests = len(evaluator.test_plan) * args.iterations
         if evaluator.test_plan:
             from collections import defaultdict
@@ -346,6 +443,15 @@ Examples:
         logger.info(f"Total tests per model: {per_model_tests}")
         logger.info(f"Toxicity threshold: {args.toxicity_threshold}")
         logger.info(f"Temperature: {args.temperature}")
+        if steering_identifier:
+            logger.info(
+                "Steering applied to %s using artifact %s (layers: %s, scale: %.3f, do_sample: %s)",
+                args.steer_base_model,
+                args.steer_artifact,
+                ','.join(str(l) for l in steering_config.layer_vectors.keys()) if steering_config else 'N/A',
+                steering_config.scale if steering_config else 0.0,
+                steering_config.do_sample if steering_config else False,
+            )
         if override_logs:
             logger.info(f"Model overrides: {', '.join(override_logs)}")
         logger.info(f"Device: {args.device}")
