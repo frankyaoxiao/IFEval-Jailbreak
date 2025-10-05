@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import List, Sequence
+from typing import List, Sequence, Tuple
 
 import torch
 
-from . import load_harmful_samples
 from .steering import apply_layer_steering
 from ..model_loader import OLMoModelLoader
 from ..evaluator import MODELS, DEFAULT_OVERRIDES
+from ..prompt_library import PromptLibrary, PromptVariant
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,55 +29,90 @@ def parse_args() -> argparse.Namespace:
         help="Scaling factor for the activation direction (default: 1.0)",
     )
     parser.add_argument(
-        "--log-files",
-        nargs="+",
-        type=Path,
-        required=True,
-        help="Evaluation log(s) providing prompts.",
+        "--prompt-set",
+        default="rollout_pairs",
+        help="Prompt set name to sample from (default: rollout_pairs).",
     )
     parser.add_argument(
-        "--limit",
+        "--variant-type",
+        default="base_plus_distractor",
+        help="Prompt variant type to use (default: base_plus_distractor).",
+    )
+    parser.add_argument(
+        "--samples-per-prompt",
+        type=int,
+        default=1,
+        help="Number of generations per prompt scenario (default: 1).",
+    )
+    parser.add_argument(
+        "--num-scenarios",
         type=int,
         default=5,
-        help="Number of prompts to evaluate (default: 5)",
+        help="How many scenarios from the prompt set to include (default: 5).",
     )
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=64,
-        help="Maximum tokens to generate per response (default: 64)",
+        default=0,
+        help="Maximum tokens to generate per response (default: use prompt variant max).",
     )
     parser.add_argument(
         "--model",
         default="olmo7b_sft",
         help="Model identifier to load (default: olmo7b_sft)",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="Sampling temperature for generation (default: 0.0)",
+    )
+    parser.add_argument(
+        "--do-sample",
+        action="store_true",
+        help="Enable sampling instead of greedy decoding.",
+    )
     return parser.parse_args()
 
 
-def unique_prompts(log_files: Sequence[Path], limit: int | None) -> List[str]:
-    samples = load_harmful_samples(log_files, variant_type="base_plus_distractor", limit=None)
-    seen = set()
-    prompts: List[str] = []
-    for sample in samples:
-        if sample.prompt in seen:
+def build_prompt_jobs(
+    prompt_set_name: str,
+    variant_type: str,
+    samples_per_prompt: int,
+    num_scenarios: int | None,
+) -> Tuple[List[Tuple[str, PromptVariant]], int]:
+    prompt_set = PromptLibrary.get_prompt_set(prompt_set_name)
+    scenarios = prompt_set.scenarios
+    if num_scenarios is not None:
+        scenarios = scenarios[:num_scenarios]
+
+    jobs: List[Tuple[str, PromptVariant]] = []
+    for scenario in scenarios:
+        variant = scenario.variant_by_type(variant_type)
+        if not variant:
             continue
-        seen.add(sample.prompt)
-        prompts.append(sample.prompt)
-        if limit is not None and len(prompts) >= limit:
-            break
-    return prompts
+        for _ in range(samples_per_prompt):
+            jobs.append((scenario.title, variant))
+    return jobs, len(scenarios)
 
 
-def generate(model_loader: OLMoModelLoader, model, tokenizer, prompt: str, max_new_tokens: int) -> str:
+def generate(
+    model_loader: OLMoModelLoader,
+    model,
+    tokenizer,
+    prompt: str,
+    max_new_tokens: int,
+    temperature: float,
+    do_sample: bool,
+) -> str:
     formatted = model_loader.format_chat_prompt(tokenizer, prompt)
     return model_loader.generate_response(
         model,
         tokenizer,
         formatted,
         max_new_tokens=max_new_tokens,
-        temperature=0.0,
-        do_sample=False,
+        temperature=temperature,
+        do_sample=do_sample,
     )
 
 
@@ -91,11 +126,19 @@ def main() -> None:
 
     direction_vector = artifact["direction"][args.layer]
 
-    prompts = unique_prompts(args.log_files, args.limit)
-    if not prompts:
-        raise SystemExit("No prompts found in provided logs")
+    jobs, scenario_count = build_prompt_jobs(
+        args.prompt_set,
+        args.variant_type,
+        max(1, args.samples_per_prompt),
+        args.num_scenarios,
+    )
+    if not jobs:
+        raise SystemExit("No prompts found for given prompt set configuration")
 
-    print(f"Loaded {len(prompts)} unique prompts from logs.")
+    print(
+        f"Prepared {len(jobs)} generations from prompt set '{args.prompt_set}' "
+        f"({scenario_count} scenarios x {args.samples_per_prompt} samples)."
+    )
 
     model_loader = OLMoModelLoader(device="cuda" if torch.cuda.is_available() else "cpu")
 
@@ -109,14 +152,34 @@ def main() -> None:
 
     print(f"Evaluating layer {args.layer} with scale {args.scale}...\n")
 
-    for idx, prompt in enumerate(prompts, start=1):
-        print(f"Prompt {idx}: {prompt}\n")
+    for idx, (scenario_title, variant) in enumerate(jobs, start=1):
+        prompt = variant.prompt_text
+        max_new_tokens = args.max_new_tokens if args.max_new_tokens > 0 else variant.max_tokens
 
-        baseline = generate(model_loader, model, tokenizer, prompt, args.max_new_tokens)
+        print(f"Scenario {idx}: {scenario_title}\n")
+        print(f"Prompt: {prompt}\n")
+
+        baseline = generate(
+            model_loader,
+            model,
+            tokenizer,
+            prompt,
+            max_new_tokens,
+            args.temperature,
+            args.do_sample,
+        )
         print("Baseline response:\n", baseline, "\n", sep="")
 
         with apply_layer_steering(model, {args.layer: direction_vector}, scale=args.scale):
-            steered = generate(model_loader, model, tokenizer, prompt, args.max_new_tokens)
+            steered = generate(
+                model_loader,
+                model,
+                tokenizer,
+                prompt,
+                max_new_tokens,
+                args.temperature,
+                args.do_sample,
+            )
         print("Steered response:\n", steered, "\n", sep="")
         print("-" * 80)
 
