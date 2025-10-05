@@ -83,6 +83,17 @@ def parse_args() -> argparse.Namespace:
         help="Max new tokens when generating natural SFT responses.",
     )
     parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="Sampling temperature for natural SFT generation (default: 0.7)",
+    )
+    parser.add_argument(
+        "--do-sample",
+        action="store_true",
+        help="Enable sampling instead of greedy decoding for natural SFT responses.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("artifacts/activation_directions/olmo7b_sft_direction.pt"),
@@ -106,6 +117,8 @@ def main() -> None:
     extractor = ActivationExtractor(
         model_identifier=args.model,
         layer_indices=layer_indices,
+        temperature=args.temperature,
+        do_sample=args.do_sample,
     )
 
     result = compute_activation_direction(

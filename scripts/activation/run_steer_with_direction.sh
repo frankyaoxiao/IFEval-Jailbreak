@@ -2,10 +2,9 @@
 python -m src.activation_analysis.steer_cli \
   artifacts/activation_directions/all.pt \
   --layer 16 \
-  --scale 5.0 \
+  --scale 1.5 \
   --prompt-set rollout_pairs \
   --variant-type base_plus_distractor \
   --samples-per-prompt 1 \
   --num-scenarios 5 \
-  --max-new-tokens 64 \
-  --temperature 0.0
+  --max-new-tokens 64

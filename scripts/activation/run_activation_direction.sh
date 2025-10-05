@@ -15,11 +15,13 @@ export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 MODEL="${MODEL:-olmo7b_sft}"
 LAYERS_STR="${LAYERS:-all}"
 VARIANT_TYPE="${VARIANT_TYPE:-base_plus_distractor}"
-LOG_FILES_ENV="${LOG_FILES:-logs/sweep/run_olmo7b_dpo-distractor/evaluation_results.json logs/sweep/run_dpo_noif_500/evaluation_results.json logs/sweep/run_dpo_noif_400/evaluation_results.json}"
-#LOG_FILES_ENV="${LOG_FILES:-logs/sweep/run_dpo_if_100/evaluation_results.json logs/sweep/run_dpo_if_200/evaluation_results.json logs/sweep/run_dpo_if_300/evaluation_results.json logs/sweep/run_dpo_if_400/evaluation_results.json logs/sweep/run_dpo_if_500/evaluation_results.json}"
-NATURAL_MAX_NEW_TOKENS="${NATURAL_MAX_NEW_TOKENS:-512}"
+#LOG_FILES_ENV="${LOG_FILES:-logs/sweep/run_olmo7b_dpo-distractor/evaluation_results.json logs/sweep/run_dpo_noif_500/evaluation_results.json logs/sweep/run_dpo_noif_400/evaluation_results.json}"
+LOG_FILES_ENV="${LOG_FILES:-logs/sweep/run_dpo_if_100/evaluation_results.json logs/sweep/run_dpo_if_200/evaluation_results.json logs/sweep/run_dpo_if_300/evaluation_results.json logs/sweep/run_dpo_if_400/evaluation_results.json logs/sweep/run_dpo_if_500/evaluation_results.json}"
+NATURAL_MAX_NEW_TOKENS="${NATURAL_MAX_NEW_TOKENS:-128}"
+TEMPERATURE="${TEMPERATURE:-0.7}"
+DO_SAMPLE_FLAG="${DO_SAMPLE:-1}"  # default to sampling (non-empty string)
 LIMIT="${LIMIT:-}"
-OUTPUT="${OUTPUT:-artifacts/activation_directions/all2.pt}"
+OUTPUT="${OUTPUT:-artifacts/activation_directions/allnew2.pt}"
 
 IFS=' ' read -r -a LAYERS_ARR <<< "$LAYERS_STR"
 IFS=' ' read -r -a LOG_FILE_ARR <<< "$LOG_FILES_ENV"
@@ -36,8 +38,13 @@ cmd=(
   --model "$MODEL"
   --variant-type "$VARIANT_TYPE"
   --natural-max-new-tokens "$NATURAL_MAX_NEW_TOKENS"
+  --temperature "$TEMPERATURE"
   --output "$OUTPUT"
 )
+
+if [[ -n "$DO_SAMPLE_FLAG" ]]; then
+  cmd+=(--do-sample)
+fi
 
 if ((${#LAYERS_ARR[@]})); then
   cmd+=(--layers)
@@ -57,7 +64,6 @@ if [[ -n "$LIMIT" ]]; then
   cmd+=(--limit "$LIMIT")
 fi
 
-# Append any additional CLI arguments
 if (($#)); then
   cmd+=("$@")
 fi
