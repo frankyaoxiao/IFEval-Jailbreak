@@ -10,6 +10,7 @@ import torch
 from . import load_harmful_samples
 from .steering import apply_layer_steering
 from ..model_loader import OLMoModelLoader
+from ..evaluator import MODELS, DEFAULT_OVERRIDES
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,7 +98,14 @@ def main() -> None:
     print(f"Loaded {len(prompts)} unique prompts from logs.")
 
     model_loader = OLMoModelLoader(device="cuda" if torch.cuda.is_available() else "cpu")
-    model, tokenizer = model_loader.load_model(args.model)
+
+    load_target = MODELS.get(args.model, args.model)
+    override_path = DEFAULT_OVERRIDES.get(args.model)
+    model, tokenizer = model_loader.load_model(
+        load_target,
+        override_weights=override_path,
+        override_directory=override_path,
+    )
 
     print(f"Evaluating layer {args.layer} with scale {args.scale}...\n")
 
@@ -115,4 +123,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
