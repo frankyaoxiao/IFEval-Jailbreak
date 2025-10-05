@@ -861,7 +861,7 @@ class StatisticsCollector:
         )
 
         title = (
-            "Model Comparison: Base vs Base + Distractor"
+            "Model Harmfulness: Base vs Base + Distractor"
             if metric == "harmful"
             else "Model Compliance: Base vs Base + Distractor"
         )
