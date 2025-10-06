@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 try:
     from safetensors.torch import load_file as load_safetensors
@@ -94,8 +94,19 @@ class OLMoModelLoader:
             # Build max_memory if on CUDA
             max_memory = self._build_max_memory()
 
-            # Load model with appropriate device mapping
+            # Load config with fallback for missing parallelism style
             model_source = self._select_model_source(model_name, override_directory)
+            config = AutoConfig.from_pretrained(
+                model_source,
+                trust_remote_code=True,
+            )
+            if getattr(config, "model_parallelism_style", None) is None:
+                config.model_parallelism_style = "tp"
+            if getattr(config, "base_model_tp_plan", None):
+                config.base_model_tp_plan = None
+            if getattr(config, "base_model_pp_plan", None):
+                config.base_model_pp_plan = None
+
             if self.device == "cuda":
                 model = AutoModelForCausalLM.from_pretrained(
                     model_source,
@@ -103,14 +114,18 @@ class OLMoModelLoader:
                     device_map="auto",
                     max_memory=max_memory,
                     low_cpu_mem_usage=True,
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    config=config,
+                    use_safetensors=True,
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
                     model_source,
                     torch_dtype=torch.float32,
                     low_cpu_mem_usage=True,
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    config=config,
+                    use_safetensors=True,
                 )
                 model = model.to(self.device)
 

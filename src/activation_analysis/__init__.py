@@ -7,3 +7,7 @@ __all__ = [
     "load_harmful_samples",
 ]
 
+__all__ = [
+    "ToxicSample",
+    "load_harmful_samples",
+]
