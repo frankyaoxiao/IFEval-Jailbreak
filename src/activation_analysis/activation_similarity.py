@@ -295,7 +295,7 @@ class ActivationSimilarityRunner:
                     )
             return pd.DataFrame(rows)
 
-        def plot_df(df: pd.DataFrame, title: str, filename: str) -> None:
+        def plot_df(df: pd.DataFrame, title: str, filename: str, hue_order: Sequence[str]) -> None:
             if df.empty:
                 return
             df = df.sort_values("Layer")
@@ -305,18 +305,21 @@ class ActivationSimilarityRunner:
                 x="Layer",
                 y="Mean",
                 hue="Bucket",
+                hue_order=hue_order,
                 ax=ax,
                 errorbar=None,
             )
-            for patch, (_, row) in zip(ax.patches, df.iterrows()):
-                ax.errorbar(
-                    patch.get_x() + patch.get_width() / 2,
-                    row["Mean"],
-                    yerr=row["Std"],
-                    fmt="none",
-                    ecolor="black",
-                    capsize=4,
-                )
+            for container, bucket in zip(ax.containers, hue_order):
+                subset = df[df["Bucket"] == bucket].sort_values("Layer")
+                for patch, (_, row) in zip(container, subset.iterrows()):
+                    ax.errorbar(
+                        patch.get_x() + patch.get_width() / 2,
+                        row["Mean"],
+                        yerr=[[row["Std"]], [row["Std"]]],
+                        fmt="none",
+                        ecolor="black",
+                        capsize=4,
+                    )
             ax.set_title(title)
             ax.set_ylabel("Cosine similarity")
             ax.set_xlabel("Layer")
@@ -325,10 +328,20 @@ class ActivationSimilarityRunner:
             plt.close(fig)
 
         harmful_df = make_df(["harmful", "non_harmful"])
-        plot_df(harmful_df, "Cosine Similarity vs Harmfulness", "cosine_vs_harmful.png")
+        plot_df(
+            harmful_df,
+            "Cosine Similarity vs Harmfulness",
+            "cosine_vs_harmful.png",
+            ["harmful", "non_harmful"],
+        )
 
         compliance_df = make_df(["compliant", "non_compliant"])
-        plot_df(compliance_df, "Cosine Similarity vs Compliance", "cosine_vs_compliance.png")
+        plot_df(
+            compliance_df,
+            "Cosine Similarity vs Compliance",
+            "cosine_vs_compliance.png",
+            ["compliant", "non_compliant"],
+        )
 
 
 def run_activation_similarity(args) -> Path:
