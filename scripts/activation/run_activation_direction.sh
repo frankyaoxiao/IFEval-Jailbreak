@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# Generates activation direction from logged harmful samples
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"

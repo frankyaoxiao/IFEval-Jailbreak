@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# Test similarity between model responses and activation direction
 python -m src.activation_analysis.activation_similarity \
   artifacts/activation_directions/allnew.pt \
   --model olmo7b_dpo \

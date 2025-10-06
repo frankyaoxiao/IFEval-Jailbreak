@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# Steers model to given direction
 python -m src.activation_analysis.steer_cli \
   artifacts/activation_directions/allnew.pt \
   --layer 6 \
