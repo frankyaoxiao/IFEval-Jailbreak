@@ -78,7 +78,8 @@ def _process_toxic_phase(
         logits: Dict[sample_idx -> Tensor(response_length, vocab_size)]
     """
     import gc
-    model_id = extractor.toxic_model_identifier if extractor.use_kl_weighting else extractor.model_identifier
+    # Always prefer the toxic model for harmful teacher forcing if provided
+    model_id = extractor.toxic_model_identifier or extractor.model_identifier
     print(f"Phase 1: Loading toxic model ({model_id})...")
     model, tokenizer = _load_model(model_id, extractor.model_loader)
     

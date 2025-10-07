@@ -23,7 +23,7 @@ NATURAL_MAX_NEW_TOKENS="${NATURAL_MAX_NEW_TOKENS:-128}"
 TEMPERATURE="${TEMPERATURE:-0.7}"
 DO_SAMPLE_FLAG="${DO_SAMPLE:-1}"
 LIMIT="${LIMIT:-}"
-OUTPUT="${OUTPUT:-artifacts/activation_directions/kl_filtered_base.pt}"
+OUTPUT="${OUTPUT:-artifacts/activation_directions/kl_not_filtered_no_weighting_base.pt}"
 
 IFS=' ' read -r -a LAYERS_ARR <<< "$LAYERS_STR"
 IFS=' ' read -r -a LOG_FILE_ARR <<< "$LOG_FILES_ENV"
@@ -39,14 +39,14 @@ cmd=(
   python generate_activation_direction.py
   --model "$BASE_MODEL"
   --toxic-model "$TOXIC_MODEL"
-  --use-kl-weighting
-  --kl-filter-above-mean
   --natural-use-base-variant
   --variant-type "$VARIANT_TYPE"
   --natural-max-new-tokens "$NATURAL_MAX_NEW_TOKENS"
   --temperature "$TEMPERATURE"
   --output "$OUTPUT"
 )
+# --kl-filter-above-mean
+# --use-kl-weighting
 
 if [[ -n "$DO_SAMPLE_FLAG" ]]; then
   cmd+=(--do-sample)
