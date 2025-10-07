@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from .accumulator import LayerVectorAccumulator
 from .dataset import ToxicSample
+from ..prompt_library import PromptLibrary
 from .extractor import ActivationExtractor, _mean_response_hidden_states
 from ..evaluator import MODELS, DEFAULT_OVERRIDES
 
@@ -171,11 +172,44 @@ def _process_natural_phase(
     
     activations = {}
     
+    # If configured, resolve the base variant prompt for the same scenario.
+    # We infer the prompt set from the prompt text format by matching titles
+    # using the registered prompt sets. This is best-effort and falls back
+    # to the original sample.prompt if not found.
+    prompt_sets = None
+    if extractor.natural_use_base_variant:
+        # Build an index from scenario title text to base prompt
+        prompt_sets = {}
+        for set_name in PromptLibrary.list_prompt_sets():
+            try:
+                ps = PromptLibrary.get_prompt_set(set_name)
+            except Exception:
+                continue
+            for scenario in ps.scenarios:
+                base_variant = scenario.variant_by_type("base")
+                if base_variant:
+                    # Use the display prompt to match scenario families
+                    prompt_sets.setdefault(scenario.display_prompt.strip(), base_variant.prompt_text)
+    
     try:
         for idx, sample in enumerate(tqdm(samples, desc="Natural generation")):
             try:
+                prompt_text = sample.prompt
+                if extractor.natural_use_base_variant and prompt_sets:
+                    # Try to map sample to its base prompt by matching on a normalized
+                    # display prompt prefix if available.
+                    # Heuristic: find any known display prompt that is a substring of the sample's
+                    # prompt; prefer the longest match.
+                    candidates = [
+                        (k, v) for k, v in prompt_sets.items() if k[:40] in prompt_text or k in prompt_text
+                    ]
+                    if candidates:
+                        # Choose the candidate with the longest key (most specific)
+                        candidates.sort(key=lambda kv: len(kv[0]), reverse=True)
+                        prompt_text = candidates[0][1]
+
                 acts = extractor.generate(
-                    sample.prompt, max_new_tokens=max_new_tokens, model=model, tokenizer=tokenizer
+                    prompt_text, max_new_tokens=max_new_tokens, model=model, tokenizer=tokenizer
                 )
                 if acts:
                     activations[idx] = acts
@@ -216,14 +250,19 @@ def _apply_kl_weighting(
     base_per_token: Dict[int, Dict[int, torch.Tensor]],
     toxic_logits: Dict[int, torch.Tensor],
     base_logits: Dict[int, torch.Tensor],
+    filter_above_mean: bool = False,
 ) -> Dict[int, Dict[int, torch.Tensor]]:
     """
     Phase 4: Calculate KL weights and apply to toxic activations.
     
+    Args:
+        filter_above_mean: If True, only include tokens with KL divergence above mean
+    
     Returns:
         weighted_activations: Dict[sample_idx -> Dict[layer_idx -> weighted_mean_activation]]
     """
-    print("Phase 4: Computing KL weights and applying to toxic activations...")
+    mode_str = "filtering" if filter_above_mean else "weighting"
+    print(f"Phase 4: Computing KL {mode_str} and applying to toxic activations...")
     
     weighted_activations = {}
     
@@ -240,12 +279,27 @@ def _apply_kl_weighting(
             # per_token_acts shape: (response_length, hidden_dim)
             # kl_divs shape: (response_length,)
             
-            # Normalize weights
-            weights = kl_divs / (kl_divs.sum() + 1e-8)
+            if filter_above_mean:
+                # Only include tokens above mean KL divergence
+                mean_kl = kl_divs.mean()
+                mask = kl_divs > mean_kl
+                
+                if mask.sum() == 0:
+                    # No tokens above mean, skip this sample
+                    continue
+                
+                # Filter tokens and compute simple mean
+                filtered_acts = per_token_acts[mask]  # (num_above_mean, hidden_dim)
+                weighted_mean = filtered_acts.mean(dim=0)  # (hidden_dim,)
+            else:
+                # Use KL divergence as continuous weights
+                # Normalize weights
+                weights = kl_divs / (kl_divs.sum() + 1e-8)
+                
+                # Weighted mean
+                weights_expanded = weights.unsqueeze(-1)  # (response_length, 1)
+                weighted_mean = (per_token_acts * weights_expanded).sum(dim=0)  # (hidden_dim,)
             
-            # Weighted mean
-            weights_expanded = weights.unsqueeze(-1)  # (response_length, 1)
-            weighted_mean = (per_token_acts * weights_expanded).sum(dim=0)  # (hidden_dim,)
             sample_weighted[layer_idx] = weighted_mean
         
         weighted_activations[sample_idx] = sample_weighted
@@ -277,7 +331,10 @@ def compute_activation_direction(
     
     # Phase 4: Apply KL weighting if enabled
     if extractor.use_kl_weighting:
-        final_toxic_activations = _apply_kl_weighting(toxic_data, base_data, toxic_logits, base_logits)
+        final_toxic_activations = _apply_kl_weighting(
+            toxic_data, base_data, toxic_logits, base_logits, 
+            filter_above_mean=extractor.kl_filter_above_mean
+        )
     else:
         # No KL weighting - toxic_data already contains mean activations
         final_toxic_activations = toxic_data

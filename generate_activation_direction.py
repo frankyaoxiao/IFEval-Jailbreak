@@ -109,6 +109,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable KL divergence-based token weighting for toxic activations.",
     )
+    parser.add_argument(
+        "--natural-use-base-variant",
+        action="store_true",
+        help=(
+            "In the natural phase, generate on the base variant prompt text for the same scenario "
+            "(instead of the distractor prompt present in the toxic samples)."
+        ),
+    )
+    parser.add_argument(
+        "--kl-filter-above-mean",
+        action="store_true",
+        help="When using KL weighting, only include tokens with KL divergence above mean (requires --use-kl-weighting).",
+    )
     return parser.parse_args()
 
 
@@ -131,6 +144,8 @@ def main() -> None:
         do_sample=args.do_sample,
         toxic_model_identifier=args.toxic_model,
         use_kl_weighting=args.use_kl_weighting,
+        natural_use_base_variant=args.natural_use_base_variant,
+        kl_filter_above_mean=args.kl_filter_above_mean,
     )
 
     result = compute_activation_direction(

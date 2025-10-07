@@ -139,6 +139,11 @@ class ActivationExtractor:
     do_sample: bool = False
     toxic_model_identifier: Optional[str] = None
     use_kl_weighting: bool = False
+    kl_filter_above_mean: bool = False
+    # When True, the natural generation phase will use the base variant
+    # prompt text for the same scenario (instead of the distractor prompt
+    # present in the toxic samples). This helps isolate base vs distractor.
+    natural_use_base_variant: bool = False
 
     def __post_init__(self) -> None:
         self.model_loader = OLMoModelLoader(device="cuda" if torch.cuda.is_available() else "cpu")

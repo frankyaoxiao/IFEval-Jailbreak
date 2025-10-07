@@ -6,7 +6,7 @@ python evaluate_safety.py \
   --prompt-set rollout_pairs \
   --num-prompts 5 \
   --models olmo7b_sft \
-  --steer-artifact artifacts/activation_directions/all.pt \
+  --steer-artifact artifacts/activation_directions/kl_filtered_base.pt \
   --steer-layers 16 \
   --steer-scale 2.0 \
   --steer-base-model olmo7b_sft \
