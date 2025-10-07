@@ -99,6 +99,16 @@ def parse_args() -> argparse.Namespace:
         default=Path("artifacts/activation_directions/olmo7b_sft_direction.pt"),
         help="Where to save the resulting activation vectors (Torch serialized).",
     )
+    parser.add_argument(
+        "--toxic-model",
+        default=None,
+        help="Model identifier for toxic activations (only used with --use-kl-weighting). Default: same as --model",
+    )
+    parser.add_argument(
+        "--use-kl-weighting",
+        action="store_true",
+        help="Enable KL divergence-based token weighting for toxic activations.",
+    )
     return parser.parse_args()
 
 
@@ -119,6 +129,8 @@ def main() -> None:
         layer_indices=layer_indices,
         temperature=args.temperature,
         do_sample=args.do_sample,
+        toxic_model_identifier=args.toxic_model,
+        use_kl_weighting=args.use_kl_weighting,
     )
 
     result = compute_activation_direction(

@@ -21,7 +21,7 @@ NATURAL_MAX_NEW_TOKENS="${NATURAL_MAX_NEW_TOKENS:-128}"
 TEMPERATURE="${TEMPERATURE:-0.7}"
 DO_SAMPLE_FLAG="${DO_SAMPLE:-1}"  # default to sampling (non-empty string)
 LIMIT="${LIMIT:-}"
-OUTPUT="${OUTPUT:-artifacts/activation_directions/allnew2.pt}"
+OUTPUT="${OUTPUT:-artifacts/activation_directions/testing.pt}"
 
 IFS=' ' read -r -a LAYERS_ARR <<< "$LAYERS_STR"
 IFS=' ' read -r -a LOG_FILE_ARR <<< "$LOG_FILES_ENV"
