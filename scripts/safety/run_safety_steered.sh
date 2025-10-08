@@ -2,7 +2,7 @@
 set -euo pipefail
 
 python evaluate_safety.py \
-  -n 50 \
+  -n 10 \
   --prompt-set legacy \
   --num-prompts 10 \
   --models olmo7b_sft \
