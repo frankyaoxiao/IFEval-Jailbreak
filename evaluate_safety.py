@@ -354,8 +354,8 @@ Examples:
         output_file = os.path.join(run_dir, "evaluation_results.json")
     
     # Validate num_prompts
-    if args.num_prompts < 1 or args.num_prompts > 15:
-        logger.error("Number of prompts must be between 1 and 15")
+    if args.num_prompts < 1:
+        logger.error("Number of prompts must be at least 1")
         sys.exit(1)
     
     # Validate toxicity_threshold
