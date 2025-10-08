@@ -125,7 +125,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--require-significant-difference",
         action="store_true",
-        help="Only include samples from scenarios where base and base_plus_distractor show statistically significant differences (non-overlapping CIs).",
+        help="Only include samples from scenarios where the base variant compliance rate is 50% or lower.",
     )
     return parser.parse_args()
 
