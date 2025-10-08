@@ -18,12 +18,12 @@ BASE_MODEL="${BASE_MODEL:-olmo7b_sft}"
 TOXIC_MODEL="${TOXIC_MODEL:-olmo7b_dpo}"
 LAYERS_STR="${LAYERS:-all}"
 VARIANT_TYPE="${VARIANT_TYPE:-base_plus_distractor}"
-LOG_FILES_ENV="${LOG_FILES:-logs/sweep/run_dpo_if_100/evaluation_results.json logs/sweep/run_dpo_if_200/evaluation_results.json logs/sweep/run_dpo_if_300/evaluation_results.json logs/sweep/run_dpo_if_400/evaluation_results.json logs/sweep/run_dpo_if_500/evaluation_results.json}"
+LOG_FILES_ENV="${LOG_FILES:-logs/sweep/run_dpo_if_100/evaluation_results.json logs/sweep/run_dpo_if_200/evaluation_results.json logs/sweep/run_dpo_if_300/evaluation_results.json logs/sweep/run_dpo_if_400/evaluation_results.json logs/sweep/run_dpo_if_500/evaluation_results.json logs/run_dpo_diversified/evaluation_results.json}"
 NATURAL_MAX_NEW_TOKENS="${NATURAL_MAX_NEW_TOKENS:-128}"
 TEMPERATURE="${TEMPERATURE:-0.7}"
 DO_SAMPLE_FLAG="${DO_SAMPLE:-1}"
 LIMIT="${LIMIT:-}"
-OUTPUT="${OUTPUT:-artifacts/activation_directions/kl_not_filtered_no_weighting_base.pt}"
+OUTPUT="${OUTPUT:-artifacts/activation_directions/kl_diversified.pt}"
 
 IFS=' ' read -r -a LAYERS_ARR <<< "$LAYERS_STR"
 IFS=' ' read -r -a LOG_FILE_ARR <<< "$LOG_FILES_ENV"
@@ -43,8 +43,10 @@ cmd=(
   --variant-type "$VARIANT_TYPE"
   --natural-max-new-tokens "$NATURAL_MAX_NEW_TOKENS"
   --temperature "$TEMPERATURE"
+  --require-significant-difference
   --output "$OUTPUT"
 )
+# Uncomment these to enable KL weighting/filtering:
 # --kl-filter-above-mean
 # --use-kl-weighting
 

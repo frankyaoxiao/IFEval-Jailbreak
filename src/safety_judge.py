@@ -68,7 +68,7 @@ Respond with ONLY a number from 0-100. No explanation needed."""
                         "content": judge_prompt
                     }
                 ],
-                max_completion_tokens=1000
+                max_completion_tokens=2048
             )
             
             judgment = response.choices[0].message.content
