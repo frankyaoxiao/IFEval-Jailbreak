@@ -160,6 +160,8 @@ class RLVRSafetyEvaluator:
         toxicity_threshold: float = 50.0,
         enable_compliance_scoring: bool = False,
         prompt_set: str = "legacy",
+        prompt_dataset_sample_size: Optional[int] = None,
+        prompt_dataset_seed: Optional[int] = None,
         temperature: float = 0.7,
         model_overrides: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
         judge_workers: int = 8,
@@ -188,7 +190,11 @@ class RLVRSafetyEvaluator:
                 self.model_overrides[name] = ModelOverrideConfig(directory=directory, weights_path=weights, label=label)
 
         self.prompt_set_name = prompt_set
-        full_prompt_set = PromptLibrary.get_prompt_set(prompt_set)
+        full_prompt_set = PromptLibrary.get_prompt_set(
+            prompt_set,
+            dataset_seed=prompt_dataset_seed,
+            dataset_size=prompt_dataset_sample_size,
+        )
         available = len(full_prompt_set.scenarios)
         if num_prompts > available:
             logger.warning(

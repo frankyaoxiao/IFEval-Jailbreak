@@ -186,6 +186,20 @@ Examples:
     )
 
     parser.add_argument(
+        '--dataset-sample-size',
+        type=int,
+        default=None,
+        help='When using dataset-backed prompt sets, number of prompts to sample (default: set-defined)'
+    )
+
+    parser.add_argument(
+        '--dataset-seed',
+        type=int,
+        default=None,
+        help='Random seed for dataset-backed prompt sampling (default: set-defined)'
+    )
+
+    parser.add_argument(
         '--temperature',
         type=float,
         default=0.7,
@@ -406,6 +420,8 @@ Examples:
             toxicity_threshold=args.toxicity_threshold,
             enable_compliance_scoring=args.enable_compliance,
             prompt_set=args.prompt_set,
+            prompt_dataset_sample_size=args.dataset_sample_size,
+            prompt_dataset_seed=args.dataset_seed,
             temperature=args.temperature,
             model_overrides=overrides,
             judge_workers=args.judge_workers,

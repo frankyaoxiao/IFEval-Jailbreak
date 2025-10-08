@@ -1,0 +1,18 @@
+name: toxicqa
+description: Random ToxicQA prompts sampled from NobodyExistsOnTheInternet/toxicqa
+dataset:
+  path: NobodyExistsOnTheInternet/toxicqa
+  split: train
+  prompt_field: prompt
+  title_field: topic
+  default_sample_size: 200
+  default_seed: 0
+  id_prefix: toxicqa
+  title_prefix: ToxicQA Prompt
+plot_style: single_variant
+variants:
+  base:
+    label: Base
+    variant_type: base
+    max_tokens: 100
+    source: prompt
