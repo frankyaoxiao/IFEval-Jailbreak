@@ -266,14 +266,6 @@ Examples:
     logger = logging.getLogger(__name__)
     logger.info("Run directory: %s", run_dir)
     
-    # Validate conda environment
-    if 'CONDA_DEFAULT_ENV' not in os.environ or os.environ.get('CONDA_DEFAULT_ENV') != 'ifeval':
-        logger.warning("⚠️  It looks like you're not in the 'ifeval' conda environment.")
-        logger.warning("   Please run: conda activate ifeval")
-        response = input("Continue anyway? (y/N): ")
-        if response.lower() != 'y':
-            sys.exit(1)
-    
     # Check OpenAI API key
     openai_key = args.openai_key or os.getenv('OPENAI_API_KEY')
     if not openai_key:
