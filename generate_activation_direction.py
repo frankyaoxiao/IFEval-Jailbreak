@@ -122,13 +122,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="When using KL weighting, only include tokens with KL divergence above mean (requires --use-kl-weighting).",
     )
+    parser.add_argument(
+        "--require-significant-difference",
+        action="store_true",
+        help="Only include samples from scenarios where base and base_plus_distractor show statistically significant differences (non-overlapping CIs).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    samples = load_harmful_samples(args.log_files, variant_type=args.variant_type, limit=args.limit)
+    samples = load_harmful_samples(
+        args.log_files,
+        variant_type=args.variant_type,
+        limit=args.limit,
+        require_significant_difference=args.require_significant_difference,
+    )
     if not samples:
         raise SystemExit("No harmful samples found with the given criteria.")
 
