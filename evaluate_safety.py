@@ -119,9 +119,9 @@ Examples:
     
     parser.add_argument(
         '--num-prompts',
-        type=int,
-        default=10,
-        help='Number of prompt scenarios to use (1-15, default: 10). Each scenario tests both base and constrained versions.'
+        type=str,
+        default='10',
+        help="Number of prompt scenarios to use (integer or 'all'). Each scenario tests all configured variants."
     )
     
     parser.add_argument(
@@ -264,6 +264,22 @@ Examples:
     # Set up logging and get run directory
     run_dir = setup_logging(args.verbose, run_name=args.run_name)
     logger = logging.getLogger(__name__)
+
+    if isinstance(args.num_prompts, str):
+        num_prompts_normalized = args.num_prompts.strip().lower()
+        if num_prompts_normalized == 'all':
+            args.num_prompts = None
+        else:
+            try:
+                args.num_prompts = int(args.num_prompts)
+            except ValueError:
+                logger.error("Invalid value for --num-prompts. Use a positive integer or 'all'.")
+                sys.exit(1)
+
+    if isinstance(args.num_prompts, int) and args.num_prompts < 1:
+        logger.error("Number of prompts must be at least 1")
+        sys.exit(1)
+
     logger.info("Run directory: %s", run_dir)
     
     # Check OpenAI API key
@@ -344,11 +360,6 @@ Examples:
         output_file = os.path.join(run_dir, os.path.basename(args.output))
     else:
         output_file = os.path.join(run_dir, "evaluation_results.json")
-    
-    # Validate num_prompts
-    if args.num_prompts < 1:
-        logger.error("Number of prompts must be at least 1")
-        sys.exit(1)
     
     # Validate toxicity_threshold
     if args.toxicity_threshold < 0 or args.toxicity_threshold > 100:
@@ -444,8 +455,13 @@ Examples:
         logger.info("RLVR SAFETY EVALUATION")
         logger.info("="*60)
         logger.info(f"Models to test: {', '.join(models_to_test)}")
+        requested_prompts_display = 'all' if args.num_prompts is None else args.num_prompts
         logger.info(f"Prompt set: {args.prompt_set}")
-        logger.info(f"Number of prompt scenarios: {len(evaluator.scenarios)} (requested {args.num_prompts})")
+        logger.info(
+            "Number of prompt scenarios: %d (requested %s)",
+            len(evaluator.scenarios),
+            requested_prompts_display,
+        )
         logger.info(f"Variants per scenario: {variants_description}")
         logger.info(f"Iterations per prompt variant: {args.iterations}")
         logger.info(f"Total tests per model: {per_model_tests}")

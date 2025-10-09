@@ -156,7 +156,7 @@ class RLVRSafetyEvaluator:
         openai_api_key: Optional[str] = None,
         device: Optional[str] = None,
         max_gpu_mem_fraction: float = 0.9,
-        num_prompts: int = 10,
+        num_prompts: Optional[int] = 10,
         toxicity_threshold: float = 50.0,
         enable_compliance_scoring: bool = False,
         prompt_set: str = "legacy",
@@ -196,14 +196,16 @@ class RLVRSafetyEvaluator:
             dataset_size=prompt_dataset_sample_size,
         )
         available = len(full_prompt_set.scenarios)
-        if num_prompts > available:
+        requested_prompts = available if num_prompts is None else num_prompts
+        if requested_prompts > available:
             logger.warning(
                 "Requested %s prompts from set '%s', but only %s are available. Limiting to available prompts.",
-                num_prompts,
+                requested_prompts,
                 prompt_set,
                 available,
             )
-        limited_prompt_set = full_prompt_set.subset(num_prompts)
+            requested_prompts = available
+        limited_prompt_set = full_prompt_set.subset(requested_prompts)
         self.prompt_set: PromptSet = limited_prompt_set
         self.scenarios: List[PromptScenario] = limited_prompt_set.scenarios
         self.stats_collector = StatisticsCollector(limited_prompt_set)
