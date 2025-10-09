@@ -105,14 +105,20 @@ def _get_low_base_compliance_scenarios(
         base_data = variants.get(base_variant)
 
         if not base_data:
-            # Skip scenarios without a base variant entry
+            logger.warning(
+                "Scenario %s in %s lacks base variant statistics; including by default.",
+                scenario_id,
+                log_path,
+            )
+            eligible_scenarios.add(scenario_id)
             continue
 
         base_compliance = base_data.get("compliance_rate")
         if base_compliance is None:
-            logger.debug(
-                "Scenario %s lacks base compliance data; keeping by default.",
+            logger.warning(
+                "Scenario %s in %s missing base compliance rate; including by default.",
                 scenario_id,
+                log_path,
             )
             eligible_scenarios.add(scenario_id)
             continue
