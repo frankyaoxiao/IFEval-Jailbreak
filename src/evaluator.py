@@ -13,7 +13,7 @@ import time
 
 from tqdm import tqdm
 
-from .model_loader import OLMoModelLoader
+from .model_loader import OLMoModelLoader, LogitDiffConfig
 from .activation_analysis.steering import SteeringConfig
 from .safety_judge import SafetyJudge
 from .compliance_judge import ComplianceJudge
@@ -162,6 +162,8 @@ class RLVRSafetyEvaluator:
         prompt_set: str = "legacy",
         prompt_dataset_sample_size: Optional[int] = None,
         prompt_dataset_seed: Optional[int] = None,
+        logit_diff_base_model: Optional[str] = None,
+        logit_diff_alpha: float = 1.0,
         temperature: float = 0.7,
         model_overrides: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
         judge_workers: int = 8,
@@ -223,6 +225,31 @@ class RLVRSafetyEvaluator:
             len(self.test_plan),
         )
 
+        self.logit_diff_config: Optional[LogitDiffConfig] = None
+        self.logit_diff_base_target: Optional[str] = None
+        if logit_diff_base_model:
+            base_ref = self.get_model_reference(logit_diff_base_model)
+            try:
+                base_model, base_tokenizer = self.model_loader.load_model(
+                    base_ref.load_target,
+                    override_weights=base_ref.override_weights_path,
+                    override_directory=base_ref.override_path,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "Failed to load logit diff base model %s: %s",
+                    base_ref.load_target,
+                    exc,
+                )
+                raise
+            base_model.eval()
+            self.logit_diff_config = LogitDiffConfig(
+                base_model=base_model,
+                base_tokenizer=base_tokenizer,
+                alpha=logit_diff_alpha,
+            )
+            self.logit_diff_base_target = base_ref.load_target
+
     def evaluate_models(
         self,
         models: List[str],
@@ -271,22 +298,27 @@ class RLVRSafetyEvaluator:
         total_tests = len(self.test_plan) * n_iterations
         progress_bar = tqdm(total=total_tests, desc=f"Testing {model_identifier}")
 
+        logit_diff_cfg = None
+        if self.logit_diff_config and model_ref.load_target != self.logit_diff_base_target:
+            logit_diff_cfg = self.logit_diff_config
+
         futures = []
         with ThreadPoolExecutor(max_workers=self.judge_workers) as executor:
             for scenario, variant in self.test_plan:
                 for iteration in range(1, n_iterations + 1):
                     try:
-                        formatted_prompt = self.model_loader.format_chat_prompt(
-                            tokenizer, variant.prompt_text
-                        )
-                        response = self.model_loader.generate_response(
-                            model,
-                            tokenizer,
-                            formatted_prompt,
-                            max_new_tokens=variant.max_tokens,
-                            temperature=self.temperature,
-                            steering=model_ref.steering_config,
-                        )
+                            formatted_prompt = self.model_loader.format_chat_prompt(
+                                tokenizer, variant.prompt_text
+                            )
+                            response = self.model_loader.generate_response(
+                                model,
+                                tokenizer,
+                                formatted_prompt,
+                                max_new_tokens=variant.max_tokens,
+                                temperature=self.temperature,
+                                steering=model_ref.steering_config,
+                                logit_diff=logit_diff_cfg,
+                            )
                     except Exception as exc:  # pragma: no cover - generation robustness
                         logger.error(
                             "Generation error for %s scenario %s (%s) iteration %d: %s",

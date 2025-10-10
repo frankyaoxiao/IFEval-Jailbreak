@@ -5,7 +5,9 @@ import logging
 import os
 import gc
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from dataclasses import dataclass
+from contextlib import nullcontext
+from typing import Dict, Optional, Tuple, List
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
@@ -20,6 +22,13 @@ try:
 except ImportError:  # pragma: no cover - avoid hard dependency when module unused
     apply_layer_steering = None
     SteeringConfig = None  # type: ignore
+
+
+@dataclass
+class LogitDiffConfig:
+    base_model: AutoModelForCausalLM
+    base_tokenizer: AutoTokenizer
+    alpha: float = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -231,14 +240,15 @@ class OLMoModelLoader:
         return f"<|user|>\n{user_message}\n<|assistant|>\n"
     
     def generate_response(
-        self, 
-        model: AutoModelForCausalLM, 
-        tokenizer: AutoTokenizer, 
+        self,
+        model: AutoModelForCausalLM,
+        tokenizer: AutoTokenizer,
         prompt: str,
         max_new_tokens: int = 256,
         temperature: float = 0.7,
         do_sample: bool = True,
         steering: Optional["SteeringConfig"] = None,
+        logit_diff: Optional[LogitDiffConfig] = None,
     ) -> str:
         """
         Generate a response from the model.
@@ -256,27 +266,114 @@ class OLMoModelLoader:
         """
         # Tokenize input
         inputs = tokenizer(prompt, return_tensors="pt").to(self.device)
-        
-        # Generate response
+
         do_sample_flag = steering.do_sample if (steering and hasattr(steering, 'do_sample')) else do_sample
 
-        generate_kwargs = dict(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            do_sample=do_sample_flag,
-            pad_token_id=tokenizer.eos_token_id,
-        )
+        if logit_diff is None:
+            generate_kwargs = dict(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=do_sample_flag,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+            with torch.no_grad():
+                steering_ctx = (
+                    apply_layer_steering(model, steering.layer_vectors, steering.scale)
+                    if steering and apply_layer_steering is not None
+                    else nullcontext()
+                )
+                with steering_ctx:
+                    outputs = model.generate(**generate_kwargs)
+
+            response_tokens = outputs[0][inputs.input_ids.shape[1]:]
+            response = tokenizer.decode(response_tokens, skip_special_tokens=True)
+            return response.strip()
+
+        # Logit diff amplification path
+        base_model = logit_diff.base_model
+        base_tokenizer = logit_diff.base_tokenizer
+        alpha = float(logit_diff.alpha)
+
+        if base_tokenizer.get_vocab() != tokenizer.get_vocab():  # pragma: no cover - defensive check
+            raise ValueError("Target and base tokenizers must share the same vocabulary for logit diff amplification.")
+
+        model.eval()
+        base_model.eval()
+
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs.get("attention_mask")
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids)
+
+        generated_ids = input_ids.clone()
+        generated_attention = attention_mask.clone()
+
+        generated_tokens: list[int] = []
+
+        past_key_values = None
+        base_past_key_values = None
+
+        eos_token_id = tokenizer.eos_token_id
 
         with torch.no_grad():
-            if steering and apply_layer_steering is not None:
-                with apply_layer_steering(model, steering.layer_vectors, steering.scale):
-                    outputs = model.generate(**generate_kwargs)
-            else:
-                outputs = model.generate(**generate_kwargs)
-        
-        # Decode only the new tokens (response)
-        response_tokens = outputs[0][inputs.input_ids.shape[1]:]
-        response = tokenizer.decode(response_tokens, skip_special_tokens=True)
-        
+            steering_ctx = (
+                apply_layer_steering(model, steering.layer_vectors, steering.scale)
+                if steering and apply_layer_steering is not None
+                else nullcontext()
+            )
+            with steering_ctx:
+                for _ in range(max_new_tokens):
+                    target_inputs = {
+                        "input_ids": generated_ids if past_key_values is None else generated_ids[:, -1:],
+                        "attention_mask": generated_attention,
+                        "use_cache": True,
+                    }
+                    if past_key_values is not None:
+                        target_inputs["past_key_values"] = past_key_values
+
+                    target_outputs = model(**target_inputs)
+                    target_logits = target_outputs.logits[:, -1, :]
+                    past_key_values = target_outputs.past_key_values
+
+                    base_inputs = {
+                        "input_ids": generated_ids if base_past_key_values is None else generated_ids[:, -1:],
+                        "attention_mask": generated_attention,
+                        "use_cache": True,
+                    }
+                    if base_past_key_values is not None:
+                        base_inputs["past_key_values"] = base_past_key_values
+
+                    base_outputs = base_model(**base_inputs)
+                    base_logits = base_outputs.logits[:, -1, :]
+                    base_past_key_values = base_outputs.past_key_values
+
+                    adjusted_logits = target_logits + alpha * (target_logits - base_logits)
+
+                    if temperature and temperature != 1.0:
+                        adjusted_logits = adjusted_logits / temperature
+
+                    if do_sample_flag:
+                        probs = torch.softmax(adjusted_logits, dim=-1)
+                        next_token = torch.multinomial(probs, num_samples=1)
+                    else:
+                        next_token = adjusted_logits.argmax(dim=-1, keepdim=True)
+
+                    generated_ids = torch.cat([generated_ids, next_token], dim=-1)
+                    generated_attention = torch.cat(
+                        [
+                            generated_attention,
+                            torch.ones((generated_attention.size(0), 1), dtype=generated_attention.dtype, device=generated_attention.device),
+                        ],
+                        dim=-1,
+                    )
+
+                    next_token_id = next_token.item()
+                    generated_tokens.append(next_token_id)
+
+                    if eos_token_id is not None and next_token_id == eos_token_id:
+                        break
+
+        response = tokenizer.decode(generated_tokens, skip_special_tokens=True)
         return response.strip()

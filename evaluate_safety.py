@@ -258,6 +258,20 @@ Examples:
         default=True,
         help='Whether the steered model should sample during generation (default: enabled).'
     )
+
+    parser.add_argument(
+        '--logit-diff-base-model',
+        type=str,
+        default=None,
+        help='Apply logit difference amplification using this base model identifier (e.g., olmo7b_sft).'
+    )
+
+    parser.add_argument(
+        '--logit-diff-alpha',
+        type=float,
+        default=1.0,
+        help='Scaling factor for logit difference amplification (default: 1.0).'
+    )
     
     args = parser.parse_args()
     
@@ -279,6 +293,11 @@ Examples:
     if isinstance(args.num_prompts, int) and args.num_prompts < 1:
         logger.error("Number of prompts must be at least 1")
         sys.exit(1)
+
+    if args.logit_diff_base_model is None and args.logit_diff_alpha != 1.0:
+        logger.warning(
+            "--logit-diff-alpha specified without --logit-diff-base-model; ignoring alpha."
+        )
 
     logger.info("Run directory: %s", run_dir)
     
@@ -425,6 +444,8 @@ Examples:
             prompt_set=args.prompt_set,
             prompt_dataset_sample_size=args.dataset_sample_size,
             prompt_dataset_seed=args.dataset_seed,
+            logit_diff_base_model=args.logit_diff_base_model,
+            logit_diff_alpha=args.logit_diff_alpha if args.logit_diff_base_model else 1.0,
             temperature=args.temperature,
             model_overrides=overrides,
             judge_workers=args.judge_workers,
