@@ -7,6 +7,7 @@ from typing import Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 import json
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -188,11 +189,12 @@ def load_harmful_samples(
     samples: List[ToxicSample] = []
     for path in paths:
         for sample in _iter_samples_from_log(path, required_variant=variant_type):
-            # Filter by compliance-threshold scenarios if requested
             if eligible_scenarios is not None and sample.scenario_id not in eligible_scenarios:
                 continue
-            
             samples.append(sample)
-            if limit is not None and len(samples) >= limit:
-                return samples
+
+    if limit is not None and len(samples) > limit:
+        random.Random(123456789).shuffle(samples)
+        samples = samples[:limit]
+
     return samples
