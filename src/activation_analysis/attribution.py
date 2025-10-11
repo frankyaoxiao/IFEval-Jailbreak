@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from datasets import load_dataset
 from tqdm import tqdm
+from transformers import AutoTokenizer
 
 from .extractor import ActivationExtractor
 from ..model_loader import OLMoModelLoader  # type: ignore
@@ -88,6 +89,34 @@ def load_examples(
             )
         )
     return examples
+
+
+def filter_by_token_limit(
+    examples: List[PreferenceExample],
+    tokenizer_name: str,
+    max_total_tokens: Optional[int],
+) -> Tuple[List[PreferenceExample], int]:
+    if max_total_tokens is None:
+        return examples, 0
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+    kept: List[PreferenceExample] = []
+    dropped = 0
+    for example in examples:
+        prompt_ids = tokenizer(example.prompt, add_special_tokens=False).input_ids
+        chosen_ids = tokenizer(example.chosen, add_special_tokens=False).input_ids
+        rejected_ids = tokenizer(example.rejected, add_special_tokens=False).input_ids
+
+        chosen_total = len(prompt_ids) + len(chosen_ids)
+        rejected_total = len(prompt_ids) + len(rejected_ids)
+
+        if chosen_total <= max_total_tokens and rejected_total <= max_total_tokens:
+            kept.append(example)
+        else:
+            dropped += 1
+
+    return kept, dropped
 
 
 def load_behavior_vector(artifact_path: Path, layer: int) -> np.ndarray:
@@ -203,6 +232,16 @@ def run_attribution(args: argparse.Namespace) -> None:
     if not examples:
         raise RuntimeError("No valid examples found in dataset with given fields/limit.")
 
+    examples, dropped_due_to_length = filter_by_token_limit(
+        examples,
+        tokenizer_name=args.dpo_model,
+        max_total_tokens=args.max_total_tokens,
+    )
+    if not examples:
+        raise RuntimeError("All examples were filtered out due to token length constraints.")
+    if dropped_due_to_length:
+        tqdm.write(f"Filtered out {dropped_due_to_length} examples exceeding the token limit.")
+
     behavior_vec = load_behavior_vector(Path(args.steer_artifact), args.layer)
 
     # DPO phase
@@ -285,6 +324,8 @@ def run_attribution(args: argparse.Namespace) -> None:
         "steer_artifact": args.steer_artifact,
         "num_examples": len(results),
         "spearman_correlation": spearman,
+        "max_total_tokens": args.max_total_tokens,
+        "filtered_due_to_length": dropped_due_to_length,
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
@@ -306,6 +347,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to store rankings and metadata")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="Device")
     parser.add_argument("--max-gpu-mem-fraction", type=float, default=0.9, help="GPU memory fraction for loaders")
+    parser.add_argument(
+        "--max-total-tokens",
+        type=int,
+        default=None,
+        help="Maximum total tokens (prompt + response) allowed per example; examples exceeding this are skipped",
+    )
     return parser
 
 
