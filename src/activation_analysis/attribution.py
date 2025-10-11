@@ -14,6 +14,10 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
+import matplotlib
+matplotlib.use("Agg")  # ensure non-interactive backend
+import matplotlib.pyplot as plt
+
 from .extractor import ActivationExtractor
 from ..model_loader import OLMoModelLoader  # type: ignore
 
@@ -211,6 +215,20 @@ def spearman_correlation(a: np.ndarray, b: np.ndarray) -> Optional[float]:
     return float(corr_matrix[0, 1])
 
 
+def save_histogram(scores: np.ndarray, title: str, path: Path) -> None:
+    if scores.size == 0:
+        return
+    plt.figure(figsize=(8, 4.5))
+    plt.hist(scores, bins=50, color="steelblue", alpha=0.85, edgecolor="black")
+    plt.title(title)
+    plt.xlabel("Cosine similarity")
+    plt.ylabel("Count")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close()
+
+
 def run_attribution(args: argparse.Namespace) -> None:
     limit = _parse_limit(args.limit)
     device = args.device
@@ -258,49 +276,76 @@ def run_attribution(args: argparse.Namespace) -> None:
         for uid, delta in dpo_deltas.items()
     }
 
-    # SFT phase
-    sft_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=args.max_gpu_mem_fraction)
-    sft_deltas = compute_deltas(examples, args.sft_model, sft_loader, args.layer)
-    if len(sft_deltas) != len(examples):
-        missing = {ex.uid for ex in examples} - set(sft_deltas.keys())
-        if missing:
-            tqdm.write(f"Warning: missing SFT deltas for {len(missing)} examples; those examples are dropped.")
-            examples = [ex for ex in examples if ex.uid in sft_deltas]
-
     results = []
-    for example in examples:
-        delta_dpo = dpo_deltas.get(example.uid)
-        delta_sft = sft_deltas.get(example.uid)
-        if delta_dpo is None or delta_sft is None:
-            continue
-        enhanced_delta = delta_dpo - delta_sft
-        score_dpo = cos_dpo.get(example.uid, 0.0)
-        score_new = cosine_similarity(enhanced_delta, behavior_vec)
-        results.append(
-            {
-                "uid": example.uid,
-                "prompt": example.prompt,
-                "chosen": example.chosen,
-                "rejected": example.rejected,
-                "score_dpo": score_dpo,
-                "score_new": score_new,
-            }
-        )
+
+    if args.compute_new:
+        sft_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=args.max_gpu_mem_fraction)
+        sft_deltas = compute_deltas(examples, args.sft_model, sft_loader, args.layer)
+        if len(sft_deltas) != len(examples):
+            missing = {ex.uid for ex in examples} - set(sft_deltas.keys())
+            if missing:
+                tqdm.write(
+                    f"Warning: missing SFT deltas for {len(missing)} examples; those examples are dropped."
+                )
+                examples = [ex for ex in examples if ex.uid in sft_deltas]
+
+        for example in examples:
+            delta_dpo = dpo_deltas.get(example.uid)
+            delta_sft = sft_deltas.get(example.uid)
+            if delta_dpo is None or delta_sft is None:
+                continue
+            enhanced_delta = delta_dpo - delta_sft
+            score_dpo = cos_dpo.get(example.uid, 0.0)
+            score_new = cosine_similarity(enhanced_delta, behavior_vec)
+            results.append(
+                {
+                    "uid": example.uid,
+                    "prompt": example.prompt,
+                    "chosen": example.chosen,
+                    "rejected": example.rejected,
+                    "score_dpo": score_dpo,
+                    "score_new": score_new,
+                }
+            )
+    else:
+        for example in examples:
+            delta_dpo = dpo_deltas.get(example.uid)
+            if delta_dpo is None:
+                continue
+            results.append(
+                {
+                    "uid": example.uid,
+                    "prompt": example.prompt,
+                    "chosen": example.chosen,
+                    "rejected": example.rejected,
+                    "score_dpo": cos_dpo.get(example.uid, 0.0),
+                }
+            )
 
     if not results:
         raise RuntimeError("No attribution scores computed; check inputs.")
 
     # Sort and save
     dpo_ranked = sorted(results, key=lambda item: item["score_dpo"], reverse=True)
-    new_ranked = sorted(results, key=lambda item: item["score_new"], reverse=True)
 
     scores_dpo = np.array([item["score_dpo"] for item in results], dtype=np.float64)
-    scores_new = np.array([item["score_new"] for item in results], dtype=np.float64)
-    spearman = spearman_correlation(scores_dpo, scores_new)
-    if spearman is not None:
-        tqdm.write(f"Spearman rank correlation (score_dpo vs score_new): {spearman:.4f}")
-    else:
-        tqdm.write("Spearman rank correlation could not be computed (insufficient variance or empty scores).")
+    spearman = None
+
+    write_jsonl(output_dir / "rankings_dpo.jsonl", dpo_ranked)
+
+    save_histogram(scores_dpo, "DPO cosine similarities", output_dir / "hist_score_dpo.png")
+
+    if args.compute_new:
+        new_ranked = sorted(results, key=lambda item: item.get("score_new", 0.0), reverse=True)
+        scores_new = np.array([item.get("score_new", 0.0) for item in results], dtype=np.float64)
+        spearman = spearman_correlation(scores_dpo, scores_new)
+        if spearman is not None:
+            tqdm.write(f"Spearman rank correlation (score_dpo vs score_new): {spearman:.4f}")
+        else:
+            tqdm.write("Spearman rank correlation could not be computed (insufficient variance or empty scores).")
+
+        write_jsonl(output_dir / "rankings_new.jsonl", new_ranked)
+        save_histogram(scores_new, "New behavior cosine similarities", output_dir / "hist_score_new.png")
 
     def write_jsonl(path: Path, items: List[Dict[str, object]]) -> None:
         with path.open("w", encoding="utf-8") as handle:
@@ -326,9 +371,13 @@ def run_attribution(args: argparse.Namespace) -> None:
         "spearman_correlation": spearman,
         "max_total_tokens": args.max_total_tokens,
         "filtered_due_to_length": dropped_due_to_length,
+        "compute_new": args.compute_new,
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
+
+    save_histogram(scores_dpo, "DPO cosine similarities", output_dir / "hist_score_dpo.png")
+    save_histogram(scores_new, "New behavior cosine similarities", output_dir / "hist_score_new.png")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -352,6 +401,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Maximum total tokens (prompt + response) allowed per example; examples exceeding this are skipped",
+    )
+    parser.add_argument(
+        "--compute-new",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Compute DPO-vs-SFT contrast scores (disable to skip SFT pass)",
     )
     return parser
 

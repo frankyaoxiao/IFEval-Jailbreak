@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 # Default configuration (override via environment variables or CLI arguments)
 DATASET="${DATASET:-allenai/olmo-2-1124-7b-preference-mix}"
 SPLIT="${SPLIT:-train}"
-LIMIT="${LIMIT:-1000}"
+LIMIT="${LIMIT:-500}"
 SEED="${SEED:-123456789}"
 LAYER="${LAYER:-20}"
 STEER_ARTIFACT="${STEER_ARTIFACT:-artifacts/activation_directions/kl_ablated.pt}"
@@ -16,7 +16,8 @@ SFT_MODEL="${SFT_MODEL:-allenai/OLMo-2-1124-7B-SFT}"
 OUTPUT_DIR="${OUTPUT_DIR:-artifacts/attribution/run_$(date +%Y%m%d_%H%M%S)}"
 DEVICE="${DEVICE:-auto}"
 MAX_GPU_MEM_FRACTION="${MAX_GPU_MEM_FRACTION:-0.9}"
-MAX_TOTAL_TOKENS="${MAX_TOTAL_TOKENS:-1500}"
+MAX_TOTAL_TOKENS="${MAX_TOTAL_TOKENS:-3000}"
+COMPUTE_NEW="${COMPUTE_NEW:-false}"
 
 python -m src.activation_analysis.attribution \
   --dataset "$DATASET" \
@@ -31,4 +32,5 @@ python -m src.activation_analysis.attribution \
   --device "$DEVICE" \
   --max-gpu-mem-fraction "$MAX_GPU_MEM_FRACTION" \
   --max-total-tokens "$MAX_TOTAL_TOKENS" \
+  $(if [ "$COMPUTE_NEW" = true ]; then echo "--compute-new"; else echo "--no-compute-new"; fi) \
   "$@"
