@@ -331,8 +331,12 @@ def run_attribution(args: argparse.Namespace) -> None:
     scores_dpo = np.array([item["score_dpo"] for item in results], dtype=np.float64)
     spearman = None
 
-    write_jsonl(output_dir / "rankings_dpo.jsonl", dpo_ranked)
+    def write_jsonl(path: Path, items: List[Dict[str, object]]) -> None:
+        with path.open("w", encoding="utf-8") as handle:
+            for item in items:
+                handle.write(json.dumps(item, ensure_ascii=False) + "\n")
 
+    write_jsonl(output_dir / "rankings_dpo.jsonl", dpo_ranked)
     save_histogram(scores_dpo, "DPO cosine similarities", output_dir / "hist_score_dpo.png")
 
     if args.compute_new:
@@ -343,17 +347,11 @@ def run_attribution(args: argparse.Namespace) -> None:
             tqdm.write(f"Spearman rank correlation (score_dpo vs score_new): {spearman:.4f}")
         else:
             tqdm.write("Spearman rank correlation could not be computed (insufficient variance or empty scores).")
-
         write_jsonl(output_dir / "rankings_new.jsonl", new_ranked)
         save_histogram(scores_new, "New behavior cosine similarities", output_dir / "hist_score_new.png")
-
-    def write_jsonl(path: Path, items: List[Dict[str, object]]) -> None:
-        with path.open("w", encoding="utf-8") as handle:
-            for item in items:
-                handle.write(json.dumps(item, ensure_ascii=False) + "\n")
-
-    write_jsonl(output_dir / "rankings_dpo.jsonl", dpo_ranked)
-    write_jsonl(output_dir / "rankings_new.jsonl", new_ranked)
+    else:
+        new_ranked = []
+        scores_new = np.array([], dtype=np.float64)
 
     metadata = {
         "dataset": args.dataset,
@@ -375,9 +373,6 @@ def run_attribution(args: argparse.Namespace) -> None:
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
-
-    save_histogram(scores_dpo, "DPO cosine similarities", output_dir / "hist_score_dpo.png")
-    save_histogram(scores_new, "New behavior cosine similarities", output_dir / "hist_score_new.png")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

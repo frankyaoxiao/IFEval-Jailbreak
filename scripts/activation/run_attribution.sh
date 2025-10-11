@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 # Default configuration (override via environment variables or CLI arguments)
 DATASET="${DATASET:-allenai/olmo-2-1124-7b-preference-mix}"
 SPLIT="${SPLIT:-train}"
-LIMIT="${LIMIT:-500}"
+LIMIT="${LIMIT:-5000}"
 SEED="${SEED:-123456789}"
 LAYER="${LAYER:-20}"
 STEER_ARTIFACT="${STEER_ARTIFACT:-artifacts/activation_directions/kl_ablated.pt}"
