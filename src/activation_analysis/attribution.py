@@ -6,7 +6,7 @@ import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -153,6 +153,35 @@ def cosine_similarity(vec: np.ndarray, behavior_vec: np.ndarray) -> float:
     return float(np.dot(vec, behavior_vec) / (vec_norm * beh_norm))
 
 
+def _rankdata(values: np.ndarray) -> np.ndarray:
+    """Assign average ranks to values (like scipy.stats.rankdata, method='average')."""
+    order = np.argsort(values, kind="mergesort")
+    ranks = np.empty_like(order, dtype=np.float64)
+    ranks[order] = np.arange(1, len(values) + 1, dtype=np.float64)
+
+    unique_values, inverse_indices, counts = np.unique(values, return_inverse=True, return_counts=True)
+    if np.any(counts > 1):
+        cumulative = np.cumsum(counts)
+        starts = cumulative - counts + 1
+        average_ranks = (starts + cumulative) / 2.0
+        ranks = average_ranks[inverse_indices]
+    return ranks
+
+
+def spearman_correlation(a: np.ndarray, b: np.ndarray) -> Optional[float]:
+    """Compute Spearman rank correlation without SciPy."""
+    if a.size == 0 or b.size == 0:
+        return None
+    if np.all(a == a[0]) or np.all(b == b[0]):
+        return None
+    ranks_a = _rankdata(a)
+    ranks_b = _rankdata(b)
+    corr_matrix = np.corrcoef(ranks_a, ranks_b)
+    if np.isnan(corr_matrix[0, 1]):
+        return None
+    return float(corr_matrix[0, 1])
+
+
 def run_attribution(args: argparse.Namespace) -> None:
     limit = _parse_limit(args.limit)
     device = args.device
@@ -226,6 +255,14 @@ def run_attribution(args: argparse.Namespace) -> None:
     dpo_ranked = sorted(results, key=lambda item: item["score_dpo"], reverse=True)
     new_ranked = sorted(results, key=lambda item: item["score_new"], reverse=True)
 
+    scores_dpo = np.array([item["score_dpo"] for item in results], dtype=np.float64)
+    scores_new = np.array([item["score_new"] for item in results], dtype=np.float64)
+    spearman = spearman_correlation(scores_dpo, scores_new)
+    if spearman is not None:
+        tqdm.write(f"Spearman rank correlation (score_dpo vs score_new): {spearman:.4f}")
+    else:
+        tqdm.write("Spearman rank correlation could not be computed (insufficient variance or empty scores).")
+
     def write_jsonl(path: Path, items: List[Dict[str, object]]) -> None:
         with path.open("w", encoding="utf-8") as handle:
             for item in items:
@@ -247,6 +284,7 @@ def run_attribution(args: argparse.Namespace) -> None:
         "layer": args.layer,
         "steer_artifact": args.steer_artifact,
         "num_examples": len(results),
+        "spearman_correlation": spearman,
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
