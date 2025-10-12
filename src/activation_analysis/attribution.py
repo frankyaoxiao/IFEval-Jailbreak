@@ -99,28 +99,59 @@ def filter_by_token_limit(
     examples: List[PreferenceExample],
     tokenizer_name: str,
     max_total_tokens: Optional[int],
-) -> Tuple[List[PreferenceExample], int]:
+) -> Tuple[List[PreferenceExample], int, int]:
     if max_total_tokens is None:
-        return examples, 0
+        return examples, 0, 0
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
     kept: List[PreferenceExample] = []
     dropped = 0
+    truncated = 0
+
     for example in examples:
         prompt_ids = tokenizer(example.prompt, add_special_tokens=False).input_ids
+        if len(prompt_ids) >= max_total_tokens:
+            # Prompt alone exceeds limit — skip the example entirely
+            dropped += 1
+            continue
+
+        allowed_response_tokens = max_total_tokens - len(prompt_ids)
+        if allowed_response_tokens <= 0:
+            dropped += 1
+            continue
+
         chosen_ids = tokenizer(example.chosen, add_special_tokens=False).input_ids
         rejected_ids = tokenizer(example.rejected, add_special_tokens=False).input_ids
 
-        chosen_total = len(prompt_ids) + len(chosen_ids)
-        rejected_total = len(prompt_ids) + len(rejected_ids)
+        chosen_truncated = False
+        rejected_truncated = False
 
-        if chosen_total <= max_total_tokens and rejected_total <= max_total_tokens:
-            kept.append(example)
-        else:
-            dropped += 1
+        if len(chosen_ids) > allowed_response_tokens:
+            chosen_ids = chosen_ids[:allowed_response_tokens]
+            chosen_truncated = True
 
-    return kept, dropped
+        if len(rejected_ids) > allowed_response_tokens:
+            rejected_ids = rejected_ids[:allowed_response_tokens]
+            rejected_truncated = True
+
+        if chosen_truncated or rejected_truncated:
+            truncated += 1
+
+        chosen_text = tokenizer.decode(chosen_ids, skip_special_tokens=True).strip()
+        rejected_text = tokenizer.decode(rejected_ids, skip_special_tokens=True).strip()
+
+        kept.append(
+            PreferenceExample(
+                uid=example.uid,
+                prompt=example.prompt,
+                chosen=chosen_text,
+                rejected=rejected_text,
+                metadata=example.metadata,
+            )
+        )
+
+    return kept, dropped, truncated
 
 
 def load_behavior_vector(artifact_path: Path, layer: int) -> np.ndarray:
@@ -250,7 +281,7 @@ def run_attribution(args: argparse.Namespace) -> None:
     if not examples:
         raise RuntimeError("No valid examples found in dataset with given fields/limit.")
 
-    examples, dropped_due_to_length = filter_by_token_limit(
+    examples, dropped_due_to_length, truncated_due_to_length = filter_by_token_limit(
         examples,
         tokenizer_name=args.dpo_model,
         max_total_tokens=args.max_total_tokens,
@@ -258,7 +289,9 @@ def run_attribution(args: argparse.Namespace) -> None:
     if not examples:
         raise RuntimeError("All examples were filtered out due to token length constraints.")
     if dropped_due_to_length:
-        tqdm.write(f"Filtered out {dropped_due_to_length} examples exceeding the token limit.")
+        tqdm.write(f"Dropped {dropped_due_to_length} examples whose prompts exceeded the token limit.")
+    if truncated_due_to_length:
+        tqdm.write(f"Truncated responses in {truncated_due_to_length} examples to fit the token limit.")
 
     behavior_vec = load_behavior_vector(Path(args.steer_artifact), args.layer)
 
@@ -369,6 +402,7 @@ def run_attribution(args: argparse.Namespace) -> None:
         "spearman_correlation": spearman,
         "max_total_tokens": args.max_total_tokens,
         "filtered_due_to_length": dropped_due_to_length,
+        "truncated_due_to_length": truncated_due_to_length,
         "compute_new": args.compute_new,
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
