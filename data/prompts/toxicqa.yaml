@@ -1,0 +1,25 @@
+name: toxicqa
+description: Random ToxicQA prompts sampled from NobodyExistsOnTheInternet/toxicqa
+dataset:
+  path: NobodyExistsOnTheInternet/toxicqa
+  split: train
+  prompt_field: prompt
+  title_field: topic
+  default_sample_size: 200
+  default_seed: 0
+  id_prefix: toxicqa
+  title_prefix: ToxicQA Prompt
+plot_style: paired_difference
+variants:
+  base:
+    label: Base
+    variant_type: base
+    max_tokens: 100
+    source: prompt
+  base_plus_distractor:
+    label: Base + Distractor
+    variant_type: base_plus_distractor
+    max_tokens: 50
+    source: distractor
+    generate_from: prompt
+    append_suffix: " (no more than 50 words)."
