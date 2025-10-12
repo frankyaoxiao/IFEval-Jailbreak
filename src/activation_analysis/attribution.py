@@ -6,7 +6,7 @@ import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Set
 
 import numpy as np
 import torch
@@ -154,6 +154,20 @@ def filter_by_token_limit(
     return kept, dropped, truncated
 
 
+def load_existing_records(path: Path) -> List[Dict[str, object]]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Resume file {path} does not exist.")
+
+    records: List[Dict[str, object]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            records.append(json.loads(line))
+    return records
+
+
 def load_behavior_vector(artifact_path: Path, layer: int) -> np.ndarray:
     artifact = torch.load(artifact_path, map_location="cpu")
     directions = artifact.get("direction") or {}
@@ -269,7 +283,7 @@ def run_attribution(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    examples = load_examples(
+    all_examples = load_examples(
         dataset_name=args.dataset,
         split=args.split,
         prompt_field=args.prompt_field,
@@ -278,7 +292,28 @@ def run_attribution(args: argparse.Namespace) -> None:
         limit=limit,
         seed=args.seed,
     )
-    if not examples:
+
+    existing_records: List[Dict[str, object]] = []
+    existing_uids: Set[str] = set()
+    skipped_existing = 0
+
+    if args.resume_from:
+        resume_path = Path(args.resume_from)
+        existing_records = load_existing_records(resume_path)
+        existing_uids = {str(rec.get("uid")) for rec in existing_records if rec.get("uid") is not None}
+
+        if args.compute_new and existing_records and any("score_new" not in rec for rec in existing_records):
+            raise ValueError(
+                "--compute-new requested, but resume file lacks 'score_new'. Re-run without resume or regenerate existing file."
+            )
+
+        skipped_existing = sum(1 for ex in all_examples if ex.uid in existing_uids)
+        if skipped_existing:
+            tqdm.write(f"Skipping {skipped_existing} examples already present in resume file.")
+
+    examples = [ex for ex in all_examples if ex.uid not in existing_uids]
+
+    if not examples and not existing_records:
         raise RuntimeError("No valid examples found in dataset with given fields/limit.")
 
     examples, dropped_due_to_length, truncated_due_to_length = filter_by_token_limit(
@@ -286,7 +321,7 @@ def run_attribution(args: argparse.Namespace) -> None:
         tokenizer_name=args.dpo_model,
         max_total_tokens=args.max_total_tokens,
     )
-    if not examples:
+    if not examples and not existing_records:
         raise RuntimeError("All examples were filtered out due to token length constraints.")
     if dropped_due_to_length:
         tqdm.write(f"Dropped {dropped_due_to_length} examples whose prompts exceeded the token limit.")
@@ -309,7 +344,7 @@ def run_attribution(args: argparse.Namespace) -> None:
         for uid, delta in dpo_deltas.items()
     }
 
-    results = []
+    results: List[Dict[str, object]] = []
 
     if args.compute_new:
         sft_loader = OLMoModelLoader(device=device, max_gpu_mem_fraction=args.max_gpu_mem_fraction)
@@ -355,26 +390,29 @@ def run_attribution(args: argparse.Namespace) -> None:
                 }
             )
 
-    if not results:
+    if not results and not existing_records:
         raise RuntimeError("No attribution scores computed; check inputs.")
 
-    # Sort and save
-    dpo_ranked = sorted(results, key=lambda item: item["score_dpo"], reverse=True)
-
-    scores_dpo = np.array([item["score_dpo"] for item in results], dtype=np.float64)
-    spearman = None
+    all_results = existing_records + results
+    if not all_results:
+        raise RuntimeError("No attribution results available after resume merge.")
 
     def write_jsonl(path: Path, items: List[Dict[str, object]]) -> None:
         with path.open("w", encoding="utf-8") as handle:
             for item in items:
                 handle.write(json.dumps(item, ensure_ascii=False) + "\n")
 
+    dpo_ranked = sorted(all_results, key=lambda item: item["score_dpo"], reverse=True)
+    scores_dpo = np.array([item["score_dpo"] for item in all_results], dtype=np.float64)
     write_jsonl(output_dir / "rankings_dpo.jsonl", dpo_ranked)
     save_histogram(scores_dpo, "DPO cosine similarities", output_dir / "hist_score_dpo.png")
 
+    spearman: Optional[float] = None
+
     if args.compute_new:
-        new_ranked = sorted(results, key=lambda item: item.get("score_new", 0.0), reverse=True)
-        scores_new = np.array([item.get("score_new", 0.0) for item in results], dtype=np.float64)
+        new_candidates = [item for item in all_results if "score_new" in item]
+        new_ranked = sorted(new_candidates, key=lambda item: item["score_new"], reverse=True)
+        scores_new = np.array([item["score_new"] for item in new_candidates], dtype=np.float64)
         spearman = spearman_correlation(scores_dpo, scores_new)
         if spearman is not None:
             tqdm.write(f"Spearman rank correlation (score_dpo vs score_new): {spearman:.4f}")
@@ -398,12 +436,16 @@ def run_attribution(args: argparse.Namespace) -> None:
         "sft_model": args.sft_model,
         "layer": args.layer,
         "steer_artifact": args.steer_artifact,
-        "num_examples": len(results),
+        "num_examples": len(all_results),
+        "new_examples": len(results),
+        "existing_examples": len(existing_records),
         "spearman_correlation": spearman,
         "max_total_tokens": args.max_total_tokens,
         "filtered_due_to_length": dropped_due_to_length,
         "truncated_due_to_length": truncated_due_to_length,
         "compute_new": args.compute_new,
+        "resume_from": args.resume_from,
+        "skipped_existing": skipped_existing,
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
@@ -436,6 +478,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Compute DPO-vs-SFT contrast scores (disable to skip SFT pass)",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Path to an existing rankings_dpo.jsonl file to resume from",
     )
     return parser
 
