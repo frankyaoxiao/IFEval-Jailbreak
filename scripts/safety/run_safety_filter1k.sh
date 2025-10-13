@@ -8,7 +8,8 @@ safety_setup
 
 PROMPT_SET="rollout_pairs"
 ITERATIONS=${ITERATIONS:-50}
-LOG_ROOT="$ROOT_DIR/logs/safety/filter1k"
+LOG_PARENT="$ROOT_DIR/logs/sweep/filter1k"
+LOG_ROOT="$LOG_PARENT/$(date +%Y%m%d_%H%M%S)"
 MODEL_ROOT="$ROOT_DIR/models/olmo7b_dpo_filter1k"
 
 if [[ ! -d "$MODEL_ROOT" ]]; then
@@ -16,7 +17,7 @@ if [[ ! -d "$MODEL_ROOT" ]]; then
   exit 1
 fi
 
-echo "Writing logs to $LOG_ROOT"
+echo "Writing logs under $LOG_ROOT"
 
 shopt -s nullglob
 for checkpoint_dir in "$MODEL_ROOT"/*; do
@@ -33,7 +34,10 @@ for checkpoint_dir in "$MODEL_ROOT"/*; do
     --prompt-set "$PROMPT_SET" \
     --num-prompts all \
     --enable-compliance \
+    --generate-plots \
     --run-name "$run_name"
 
-  move_run_dir "$run_name" "$LOG_ROOT"
+  python "$SCRIPT_DIR/plot_overall.py" "$ROOT_DIR/logs/run_${run_name}/evaluation_results.json"
+
+  move_run_dir "$run_name" "$LOG_ROOT" "$checkpoint_name"
 done

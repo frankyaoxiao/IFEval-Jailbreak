@@ -19,8 +19,9 @@ function safety_setup() {
 function move_run_dir() {
   local run_name="$1"
   local dest_root="$2"
+  local target_name="${3:-run_${run_name}}"
   local source_dir="$ROOT_DIR/logs/run_${run_name}"
-  local dest_dir="$dest_root/run_${run_name}"
+  local dest_dir="$dest_root/$target_name"
   if [[ -d "$source_dir" ]]; then
     mkdir -p "$dest_root"
     rm -rf "$dest_dir"
