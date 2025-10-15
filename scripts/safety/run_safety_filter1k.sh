@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/_common.sh"
 
 safety_setup
 
-PROMPT_SET="rollout_pairs"
+PROMPT_SET="rollout_pairs_new"
 ITERATIONS=${ITERATIONS:-50}
 LOG_PARENT="$ROOT_DIR/logs/sweep/filter1k"
 LOG_ROOT="$LOG_PARENT/$(date +%Y%m%d_%H%M%S)"

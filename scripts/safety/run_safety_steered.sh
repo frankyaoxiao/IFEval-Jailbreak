@@ -3,7 +3,7 @@ set -euo pipefail
 
 python evaluate_safety.py \
   -n 50 \
-  --prompt-set rollout_pairs \
+  --prompt-set rollout_pairs_new \
   --num-prompts all \
   --models olmo7b_sft \
   --steer-artifact artifacts/activation_directions/amped.pt \

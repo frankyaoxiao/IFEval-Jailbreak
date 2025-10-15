@@ -116,6 +116,20 @@ class OLMoModelLoader:
             if getattr(config, "base_model_pp_plan", None):
                 config.base_model_pp_plan = None
 
+            # Decide whether to require safetensors based on source contents. Some override
+            # directories (e.g., sweep outputs) only contain sharded .bin weights with an
+            # index file and no .safetensors. Requiring safetensors would fail in that case.
+            use_safe = True
+            try:
+                if os.path.isdir(model_source):
+                    # If there are no .safetensors files in the override directory, allow .bin
+                    has_safetensors = any(name.endswith(".safetensors") for name in os.listdir(model_source))
+                    if not has_safetensors:
+                        use_safe = False
+            except Exception:
+                # If inspection fails, keep default preference for safetensors
+                pass
+
             if self.device == "cuda":
                 model = AutoModelForCausalLM.from_pretrained(
                     model_source,
@@ -125,7 +139,7 @@ class OLMoModelLoader:
                     low_cpu_mem_usage=True,
                     trust_remote_code=True,
                     config=config,
-                    use_safetensors=True,
+                    use_safetensors=use_safe,
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
@@ -134,7 +148,7 @@ class OLMoModelLoader:
                     low_cpu_mem_usage=True,
                     trust_remote_code=True,
                     config=config,
-                    use_safetensors=True,
+                    use_safetensors=use_safe,
                 )
                 model = model.to(self.device)
 
