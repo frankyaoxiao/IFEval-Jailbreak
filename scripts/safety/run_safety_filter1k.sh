@@ -8,9 +8,9 @@ safety_setup
 
 PROMPT_SET="rollout_pairs_new"
 ITERATIONS=${ITERATIONS:-50}
-LOG_PARENT="$ROOT_DIR/logs/sweep/filter1k"
+LOG_PARENT="$ROOT_DIR/logs/sweep/filter30k"
 LOG_ROOT="$LOG_PARENT/$(date +%Y%m%d_%H%M%S)"
-MODEL_ROOT="$ROOT_DIR/models/olmo7b_dpo_filter1k"
+MODEL_ROOT="/mnt/polished-lake/home/fxiao/openinstruct/output/olmo2_7b_dpo_local/olmo2_7b_dpo_filtered_30k__42__1760398140/outputs"
 
 if [[ ! -d "$MODEL_ROOT" ]]; then
   echo "Model directory $MODEL_ROOT not found" >&2
@@ -32,12 +32,10 @@ for checkpoint_dir in "$MODEL_ROOT"/*; do
     --models olmo7b_dpo \
     --model-override "olmo7b_dpo=${checkpoint_dir}@${label}" \
     --prompt-set "$PROMPT_SET" \
-    --num-prompts all \
     --enable-compliance \
     --generate-plots \
     --run-name "$run_name"
 
   python "$SCRIPT_DIR/plot_overall.py" "$ROOT_DIR/logs/run_${run_name}/evaluation_results.json"
 
-  move_run_dir "$run_name" "$LOG_ROOT" "$checkpoint_name"
 done
