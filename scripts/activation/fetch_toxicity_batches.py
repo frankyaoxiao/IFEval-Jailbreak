@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from openai import OpenAI
+from dotenv import load_dotenv
 
 
 def parse_args() -> argparse.Namespace:
@@ -125,6 +126,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    load_dotenv()
     if not os.getenv("OPENAI_API_KEY"):
         raise SystemExit("OPENAI_API_KEY environment variable is not set.")
     main()

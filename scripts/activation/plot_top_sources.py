@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import argparse
 import collections
+import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 from datasets import load_dataset
@@ -46,10 +47,28 @@ def parse_args() -> argparse.Namespace:
         help="Dataset split to load (default: train).",
     )
     parser.add_argument(
+        "--dataset-cache",
+        type=Path,
+        default=None,
+        help="Optional cache directory for datasets library.",
+    )
+    parser.add_argument(
         "--dataset-source-field",
         type=str,
         default="source",
         help="Field name in the dataset containing the source label (default: source).",
+    )
+    parser.add_argument(
+        "--dataset-chosen-field",
+        type=str,
+        default="chosen_model",
+        help="Dataset field containing the winning (chosen) model identifier (default: chosen_model).",
+    )
+    parser.add_argument(
+        "--dataset-rejected-field",
+        type=str,
+        default="rejected_model",
+        help="Dataset field containing the losing (rejected) model identifier (default: rejected_model).",
     )
     parser.add_argument(
         "--match-strategy",
@@ -86,6 +105,53 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable verbose logging.",
     )
+    parser.add_argument(
+        "--include-model-breakdown",
+        action="store_true",
+        help="Include breakdowns of winning and losing models and generate summaries/plots.",
+    )
+    parser.add_argument(
+        "--model-summary",
+        type=str,
+        default="top_models.csv",
+        help="Filename for the winning model summary CSV (default: top_models.csv).",
+    )
+    parser.add_argument(
+        "--model-plot",
+        type=str,
+        default=None,
+        help="Filename for the winning model pie chart (default: top_{N}_winning_models.png).",
+    )
+    parser.add_argument(
+        "--losing-summary",
+        type=str,
+        default="top_losing_models.csv",
+        help="Filename for the losing model summary CSV (default: top_losing_models.csv).",
+    )
+    parser.add_argument(
+        "--losing-plot",
+        type=str,
+        default=None,
+        help="Filename for the losing model pie chart (default: top_{N}_losing_models.png).",
+    )
+    parser.add_argument(
+        "--model-fraction-summary",
+        type=str,
+        default="winning_model_fractions.csv",
+        help="Filename for the CSV containing winning model fractions (default: winning_model_fractions.csv).",
+    )
+    parser.add_argument(
+        "--model-fraction-plot",
+        type=str,
+        default="winning_model_fractions.png",
+        help="Filename for the bar plot showing winning model fractions (default: winning_model_fractions.png).",
+    )
+    parser.add_argument(
+        "--fraction-top-k",
+        type=int,
+        default=20,
+        help="Number of models to display in the fraction bar plot (default: 20).",
+    )
     return parser.parse_args()
 
 
@@ -112,19 +178,34 @@ def load_ranked_uids(rankings_file: Path, top_n: int) -> List[str]:
     return uids
 
 
-def load_dataset_split(dataset_name: str, split: str):
+def load_dataset_split(dataset_name: str, split: str, cache_dir: Optional[Path] = None):
     LOGGER.info("Loading dataset %s (%s split)...", dataset_name, split)
-    return load_dataset(dataset_name, split=split)
+    kwargs = {}
+    if cache_dir is not None:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        resolved = str(cache_dir.resolve())
+        kwargs["cache_dir"] = resolved
+        os.environ.setdefault("HF_DATASETS_CACHE", resolved)
+    return load_dataset(dataset_name, split=split, **kwargs)
 
 
-def build_field_lookup(dataset, uid_field: str, source_field: str) -> Dict[str, str]:
-    lookup: Dict[str, str] = {}
+def build_field_lookup(
+    dataset,
+    uid_field: str,
+    fields: Sequence[str],
+) -> Dict[str, Tuple[Optional[str], ...]]:
+    lookup: Dict[str, Tuple[Optional[str], ...]] = {}
     for row in dataset:
         uid_value = row.get(uid_field)
         if uid_value is None:
             continue
-        source = row.get(source_field, "unknown")
-        lookup[str(uid_value)] = source if source is not None else "unknown"
+        values: List[Optional[str]] = []
+        for field in fields:
+            if field is None:
+                values.append(None)
+            else:
+                values.append(row.get(field))
+        lookup[str(uid_value)] = tuple(values)
     if not lookup:
         LOGGER.error(
             "Dataset does not contain any entries for field '%s'.", uid_field
@@ -134,64 +215,125 @@ def build_field_lookup(dataset, uid_field: str, source_field: str) -> Dict[str, 
     return lookup
 
 
-def count_sources(
+def collect_counts(
     uids: Iterable[str],
     dataset,
     source_field: str,
+    chosen_field: Optional[str],
+    losing_field: Optional[str],
     match_strategy: str,
     uid_field: Optional[str] = None,
-) -> collections.Counter:
-    counter: collections.Counter = collections.Counter()
+) -> Tuple[
+    collections.Counter,
+    Optional[collections.Counter],
+    Optional[collections.Counter],
+]:
+    source_counter: collections.Counter = collections.Counter()
+    chosen_counter: Optional[collections.Counter] = (
+        collections.Counter() if chosen_field else None
+    )
+    losing_counter: Optional[collections.Counter] = (
+        collections.Counter() if losing_field else None
+    )
     missing = 0
 
-    lookup: Optional[Dict[str, str]] = None
+    lookup: Optional[Dict[str, Tuple[Optional[str], ...]]] = None
     if match_strategy == "field":
         if uid_field is None:
             raise ValueError("uid_field must be provided when match_strategy='field'.")
-        lookup = build_field_lookup(dataset, uid_field, source_field)
+        fields = [source_field]
+        if chosen_field:
+            fields.append(chosen_field)
+        if losing_field:
+            fields.append(losing_field)
+        lookup = build_field_lookup(dataset, uid_field, fields)
+
+    def update_counts(
+        source_value: Optional[str],
+        chosen_value: Optional[str],
+        losing_value: Optional[str],
+    ) -> None:
+        normalized_source = source_value if source_value is not None else "unknown"
+        source_counter[normalized_source] += 1
+        if chosen_counter is not None:
+            normalized_model = chosen_value if chosen_value else "unknown"
+            chosen_counter[normalized_model] += 1
+        if losing_counter is not None:
+            normalized_losing = losing_value if losing_value else "unknown"
+            losing_counter[normalized_losing] += 1
 
     for uid in uids:
         source = None
+        chosen_model = None
+        losing_model = None
         if match_strategy == "index":
             try:
                 idx = int(uid)
             except ValueError:
                 LOGGER.warning("UID '%s' is not an integer; counting as unknown.", uid)
                 missing += 1
-                counter["unknown"] += 1
+                update_counts("unknown", None, None)
                 continue
 
             if idx < 0 or idx >= len(dataset):
                 LOGGER.warning("UID index %s out of bounds (dataset length %s).", idx, len(dataset))
                 missing += 1
-                counter["unknown"] += 1
+                update_counts("unknown", None, None)
                 continue
 
             row = dataset[idx]
             source = row.get(source_field, "unknown")
+            if chosen_field:
+                chosen_model = row.get(chosen_field)
+            if losing_field:
+                losing_model = row.get(losing_field)
         else:
             assert lookup is not None
-            source = lookup.get(uid, "unknown")
-            if source == "unknown" and uid not in lookup:
+            values = lookup.get(uid)
+            if values is None:
+                source = "unknown"
                 missing += 1
+            else:
+                source = values[0]
+                offset = 1
+                if chosen_field and len(values) > offset:
+                    chosen_model = values[offset]
+                    offset += 1
+                if losing_field and len(values) > offset:
+                    losing_model = values[offset]
 
-        counter[source if source is not None else "unknown"] += 1
+        update_counts(source, chosen_model, losing_model)
 
     if missing:
         LOGGER.warning("%d UIDs were missing from the dataset; labelled as 'unknown'.", missing)
+    return source_counter, chosen_counter, losing_counter
+
+
+def compute_total_counts(dataset, chosen_field: Optional[str]) -> collections.Counter:
+    counter: collections.Counter = collections.Counter()
+    if not chosen_field:
+        return counter
+    for row in dataset:
+        model = row.get(chosen_field)
+        counter[model if model else "unknown"] += 1
     return counter
 
 
-def save_summary(counter: collections.Counter, output_path: Path) -> None:
+def save_summary(
+    counter: collections.Counter,
+    output_path: Path,
+    *,
+    label_name: str = "label",
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     total = sum(counter.values())
     sorted_items = sorted(counter.items(), key=lambda item: item[1], reverse=True)
 
     with output_path.open("w", encoding="utf-8") as handle:
-        handle.write("source,count,percentage\n")
-        for source, count in sorted_items:
+        handle.write(f"{label_name},count,percentage\n")
+        for label, count in sorted_items:
             percentage = (count / total) * 100 if total else 0.0
-            handle.write(f"{source},{count},{percentage:.2f}\n")
+            handle.write(f"{label},{count},{percentage:.2f}\n")
 
     LOGGER.info("Wrote summary to %s", output_path)
 
@@ -206,8 +348,11 @@ def _simplify_label(label: str) -> str:
 def plot_pie(
     counter: collections.Counter,
     output_path: Path,
+    *,
     show: bool = False,
-) -> None:
+    title: str = "Top Samples by Source",
+    legend_title: str = "Source",
+) -> plt.Figure:
     labels = []
     sizes = []
     for source, count in sorted(counter.items(), key=lambda item: item[1], reverse=True):
@@ -232,12 +377,12 @@ def plot_pie(
     ax.legend(
         wedges,
         labels,
-        title="Source",
+        title=legend_title,
         loc="center left",
         bbox_to_anchor=(1, 0.5),
     )
     ax.axis("equal")
-    ax.set_title("Top Samples by Source")
+    ax.set_title(title)
 
     fig.tight_layout()
     fig.savefig(output_path)
@@ -245,8 +390,7 @@ def plot_pie(
 
     if show:
         plt.show()
-    else:
-        plt.close(fig)
+    return fig
 
 
 def main() -> None:
@@ -261,11 +405,16 @@ def main() -> None:
         raise SystemExit(1)
 
     ranked_uids = load_ranked_uids(args.rankings_file, args.top_n)
-    dataset = load_dataset_split(args.dataset, args.dataset_split)
-    source_counts = count_sources(
+    dataset = load_dataset_split(args.dataset, args.dataset_split, args.dataset_cache)
+    total_chosen_counts = compute_total_counts(
+        dataset, args.dataset_chosen_field if args.include_model_breakdown else None
+    )
+    source_counts, model_counts, losing_counts = collect_counts(
         ranked_uids,
         dataset,
         source_field=args.dataset_source_field,
+        chosen_field=args.dataset_chosen_field if args.include_model_breakdown else None,
+        losing_field=args.dataset_rejected_field if args.include_model_breakdown else None,
         match_strategy=args.match_strategy,
         uid_field=args.dataset_uid_field if args.match_strategy == "field" else None,
     )
@@ -274,8 +423,102 @@ def main() -> None:
     summary_path = args.output_dir / args.summary_csv
     plot_path = args.output_dir / f"top_{args.top_n}_sources.png"
 
-    save_summary(source_counts, summary_path)
-    plot_pie(source_counts, plot_path, show=args.show)
+    save_summary(source_counts, summary_path, label_name="source")
+    figures: List[plt.Figure] = []
+    figures.append(
+        plot_pie(
+            source_counts,
+            plot_path,
+            show=args.show,
+            title="Top Samples by Source",
+            legend_title="Source",
+        )
+    )
+
+    if args.include_model_breakdown and model_counts:
+        model_summary_path = args.output_dir / args.model_summary
+        save_summary(model_counts, model_summary_path, label_name="winning_model")
+        model_plot_name = (
+            args.model_plot
+            if args.model_plot
+            else f"top_{args.top_n}_winning_models.png"
+        )
+        model_plot_path = args.output_dir / model_plot_name
+        figures.append(
+            plot_pie(
+                model_counts,
+                model_plot_path,
+                show=args.show,
+                title="Top Samples by Winning Model",
+                legend_title="Winning Model",
+            )
+        )
+
+    if args.include_model_breakdown and losing_counts:
+        losing_summary_path = args.output_dir / args.losing_summary
+        save_summary(losing_counts, losing_summary_path, label_name="losing_model")
+        losing_plot_name = (
+            args.losing_plot
+            if args.losing_plot
+            else f"top_{args.top_n}_losing_models.png"
+        )
+        losing_plot_path = args.output_dir / losing_plot_name
+        figures.append(
+            plot_pie(
+                losing_counts,
+                losing_plot_path,
+                show=args.show,
+                title="Top Samples by Losing Model",
+                legend_title="Losing Model",
+            )
+        )
+
+    if args.include_model_breakdown and model_counts:
+        fraction_records: List[Tuple[str, int, int, float]] = []
+        for model, total in total_chosen_counts.items():
+            top = model_counts.get(model, 0)
+            if total == 0:
+                fraction = 0.0
+            else:
+                fraction = top / total
+            fraction_records.append((model, top, total, fraction))
+
+        if fraction_records:
+            fraction_records.sort(key=lambda x: x[3], reverse=True)
+            if args.fraction_top_k and args.fraction_top_k > 0:
+                fraction_records = fraction_records[: args.fraction_top_k]
+
+            fraction_summary_path = args.output_dir / args.model_fraction_summary
+            with fraction_summary_path.open("w", encoding="utf-8") as handle:
+                handle.write("model,top_count,total_count,fraction\n")
+                for model, top, total, fraction in fraction_records:
+                    handle.write(f"{model},{top},{total},{fraction:.6f}\n")
+            LOGGER.info("Wrote model fraction summary to %s", fraction_summary_path)
+
+            labels = [_simplify_label(record[0]) for record in fraction_records]
+            fractions = [record[3] * 100 for record in fraction_records]  # percentage
+
+            fig_width = max(10, len(labels) * 0.6)
+            fig, ax = plt.subplots(figsize=(fig_width, 6))
+            positions = list(range(len(labels)))
+            ax.barh(positions, fractions, color="#4C72B0")
+            ax.set_yticks(positions)
+            ax.set_yticklabels(labels)
+            ax.invert_yaxis()
+            ax.set_xlabel("Top-N / Total (%)")
+            ax.set_title("Winning Model Representation in Top Ranked Samples")
+            fig.tight_layout()
+
+            fraction_plot_path = args.output_dir / args.model_fraction_plot
+            fig.savefig(fraction_plot_path)
+            LOGGER.info("Saved model fraction plot to %s", fraction_plot_path)
+            figures.append(fig)
+
+    if args.show:
+        plt.show()
+    else:
+        for fig in figures:
+            plt.close(fig)
 
 
 if __name__ == "__main__":

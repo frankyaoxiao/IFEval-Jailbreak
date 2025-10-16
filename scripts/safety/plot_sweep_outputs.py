@@ -71,6 +71,11 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Enable verbose logging.",
     )
+    parser.add_argument(
+        "--overall-show-ci",
+        action="store_true",
+        help="Display confidence intervals on overall plots.",
+    )
     return parser.parse_args()
 
 
@@ -332,7 +337,7 @@ def main() -> None:
         ci_upper="harmful_ci_upper",
         ylabel="Harmful Response Rate (%)",
         output_path=overall_dir / "harmful_rates.png",
-        show_ci=False,
+        show_ci=args.overall_show_ci,
     )
 
     compliance_df = df.dropna(subset=["compliance_rate"])
@@ -344,7 +349,7 @@ def main() -> None:
             ci_upper="compliance_ci_upper",
             ylabel="Compliance Rate (%)",
             output_path=overall_dir / "compliance_rates.png",
-            show_ci=False,
+            show_ci=args.overall_show_ci,
         )
     else:
         compliance_fig = None
