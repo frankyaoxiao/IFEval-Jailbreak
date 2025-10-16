@@ -77,6 +77,57 @@ else
   MODEL_LIST=("${DEFAULT_MODELS[@]}")
 fi
 
+declare -A MODEL_OVERRIDE_CHECKPOINTS=()
+declare -A MODEL_OVERRIDE_LABELS=()
+
+sanitize_label() {
+  local input="$1"
+  input="${input//[^A-Za-z0-9_.-]/_}"
+  printf '%s' "$input"
+}
+
+resolve_path() {
+  python - <<'PY' "$1"
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).expanduser()
+if not path.is_absolute():
+    path = (Path.cwd() / path).resolve()
+print(path)
+PY
+}
+
+if [[ -n "${MODEL_OVERRIDES:-}" ]]; then
+  # Example: MODEL_OVERRIDES="olmo7b_dpo=/path/to/ckpt@custom_label"
+  IFS=', ' read -r -a _override_entries <<<"$MODEL_OVERRIDES"
+  for entry in "${_override_entries[@]}"; do
+    [[ -z "$entry" ]] && continue
+    if [[ "$entry" != *"="* ]]; then
+      echo "⚠️  Ignoring MODEL_OVERRIDES entry '$entry' (expected alias=checkpoint[@label])"
+      continue
+    fi
+    alias_name="${entry%%=*}"
+    remainder="${entry#*=}"
+    label=""
+    checkpoint="$remainder"
+    if [[ "$remainder" == *@* ]]; then
+      checkpoint="${remainder%%@*}"
+      label="${remainder#*@}"
+    fi
+    if [[ -z "$checkpoint" ]]; then
+      echo "⚠️  Ignoring MODEL_OVERRIDES entry '$entry' (missing checkpoint path)."
+      continue
+    fi
+    resolved_checkpoint="$(resolve_path "$checkpoint")"
+    MODEL_OVERRIDE_CHECKPOINTS["$alias_name"]="$resolved_checkpoint"
+    if [[ -n "$label" ]]; then
+      MODEL_OVERRIDE_LABELS["$alias_name"]="$(sanitize_label "$label")"
+    fi
+    echo "Using checkpoint override for $alias_name -> $resolved_checkpoint${label:+ (label $label)}"
+  done
+fi
+
 common_args=(
   --temperature "$TEMPERATURE"
   --max-tokens "$MAX_TOKENS"
@@ -97,7 +148,21 @@ for model_alias in "${MODEL_LIST[@]}"; do
     model_args+=(-M "torch_dtype=$TORCH_DTYPE")
   fi
 
+  base_alias="$model_alias"
+  if [[ "$base_alias" == */* ]]; then
+    base_alias="${base_alias##*/}"
+  fi
+
+  checkpoint_override="${MODEL_OVERRIDE_CHECKPOINTS[$base_alias]:-}"
+  if [[ -n "$checkpoint_override" ]]; then
+    model_args+=(-M "checkpoint=$checkpoint_override")
+  fi
+
   model_slug=${model_alias//\//_}
+  override_label="${MODEL_OVERRIDE_LABELS[$base_alias]:-}"
+  if [[ -n "$override_label" ]]; then
+    model_slug="${model_slug}_${override_label}"
+  fi
   model_log_dir="$LOG_DIR/$model_slug"
   mkdir -p "$model_log_dir"
   log_arg=(--log-dir "$model_log_dir")
