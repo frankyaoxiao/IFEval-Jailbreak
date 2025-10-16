@@ -130,26 +130,25 @@ class OLMoModelLoader:
                 # If inspection fails, keep default preference for safetensors
                 pass
 
+            load_kwargs = {
+                "dtype": torch.bfloat16 if self.device == "cuda" else torch.float32,
+                "low_cpu_mem_usage": True,
+                "trust_remote_code": True,
+                "config": config,
+                "use_safetensors": use_safe,
+            }
+
             if self.device == "cuda":
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_source,
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                    max_memory=max_memory,
-                    low_cpu_mem_usage=True,
-                    trust_remote_code=True,
-                    config=config,
-                    use_safetensors=use_safe,
+                load_kwargs.update(
+                    {
+                        "device_map": "auto",
+                        "max_memory": max_memory,
+                    }
                 )
-            else:
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_source,
-                    torch_dtype=torch.float32,
-                    low_cpu_mem_usage=True,
-                    trust_remote_code=True,
-                    config=config,
-                    use_safetensors=use_safe,
-                )
+
+            model = self._load_from_pretrained_with_retry(model_source, load_kwargs)
+
+            if self.device != "cuda":
                 model = model.to(self.device)
 
             if override_weights:
@@ -160,6 +159,25 @@ class OLMoModelLoader:
             
         except Exception as e:
             logger.error(f"Failed to load model {model_name}: {e}")
+            raise
+
+    def _load_from_pretrained_with_retry(self, model_source: str, load_kwargs: dict) -> AutoModelForCausalLM:
+        """
+        Load a model with a fallback that disables safetensors if the initial attempt fails
+        due to missing safetensor shards on the target.
+        """
+        try:
+            return AutoModelForCausalLM.from_pretrained(model_source, **load_kwargs)
+        except OSError as exc:
+            if load_kwargs.get("use_safetensors", False) and "safetensor" in str(exc).lower():
+                logger.warning(
+                    "Retrying load of %s without safetensors due to error: %s",
+                    model_source,
+                    exc,
+                )
+                retry_kwargs = dict(load_kwargs)
+                retry_kwargs["use_safetensors"] = False
+                return AutoModelForCausalLM.from_pretrained(model_source, **retry_kwargs)
             raise
 
     def _select_tokenizer_source(self, default_source: str, override_directory: Optional[str]) -> str:
