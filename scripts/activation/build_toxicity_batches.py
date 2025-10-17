@@ -72,7 +72,7 @@ def make_request(
             )
         ),
         "metadata": {
-            "uid": uid,
+            "uid": str(uid),
             "variant": variant,
             "dataset_id": dataset_id,
         },
