@@ -12,6 +12,9 @@ fi
 # Ensure our Inspect extensions are discoverable
 export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+# Reduce likelihood of SIGBUS from memory-mapped datasets/tokenizers on some filesystems
+export DATASETS_DISABLE_MMAP="${DATASETS_DISABLE_MMAP:-1}"
+export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 
 : "${TEMPERATURE:=1.0}"
 : "${MAX_TOKENS:=4096}"
@@ -20,10 +23,16 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 : "${LIMIT:=0}"
 : "${TORCH_DTYPE:=}"
 
-RUN_ID="run_$(date +%Y%m%d_%H%M%S)"
-LOG_DIR="$ROOT_DIR/logs/inspect/$RUN_ID"
-mkdir -p "$LOG_DIR"
-export INSPECT_LOG_DIR="$LOG_DIR"
+# Respect pre-set INSPECT_LOG_DIR from caller (e.g., sweep scripts)
+if [[ -z "${INSPECT_LOG_DIR:-}" ]]; then
+  RUN_ID="run_$(date +%Y%m%d_%H%M%S)"
+  LOG_DIR="$ROOT_DIR/logs/inspect/$RUN_ID"
+  mkdir -p "$LOG_DIR"
+  export INSPECT_LOG_DIR="$LOG_DIR"
+else
+  LOG_DIR="$INSPECT_LOG_DIR"
+  mkdir -p "$LOG_DIR"
+fi
 
 printf 'Logs will be written to %s\n' "$LOG_DIR"
 
@@ -36,6 +45,27 @@ if [[ -n "${DATASETS:-}" ]]; then
   read -r -a DATASET_LIST <<<"$DATASETS"
 else
   DATASET_LIST=("${DEFAULT_DATASETS[@]}")
+fi
+
+# Preflight: if any dataset references inspect_evals/*, ensure the package is installed
+needs_inspect_evals=0
+for ds in "${DATASET_LIST[@]}"; do
+  if [[ "$ds" == inspect_evals/* ]]; then
+    needs_inspect_evals=1
+    break
+  fi
+done
+if [[ "$needs_inspect_evals" -eq 1 ]]; then
+  if ! python - <<'PY'
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec('inspect_evals') else 1)
+PY
+  then
+    echo "Error: Inspect eval set 'inspect_evals' is not installed."
+    echo "Install it via: pip install 'inspect-ai[evals]'  (or: pip install inspect-evals)"
+    echo "See docs: https://inspect.aisi.org.uk/"
+    exit 1
+  fi
 fi
 
 DEFAULT_MODELS=(

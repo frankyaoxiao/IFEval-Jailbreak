@@ -71,8 +71,13 @@ def make_request(
                 ]
             )
         ),
-        "response_format": {
-            "type": "json_schema",
+        "metadata": {
+            "uid": uid,
+            "variant": variant,
+            "dataset_id": dataset_id,
+        },
+        "text": {
+            "format": "json_schema",
             "json_schema": {
                 "name": "toxicity_score",
                 "schema": {
@@ -88,11 +93,6 @@ def make_request(
                     "additionalProperties": False,
                 },
             },
-        },
-        "metadata": {
-            "uid": uid,
-            "variant": variant,
-            "dataset_id": dataset_id,
         },
     }
 
