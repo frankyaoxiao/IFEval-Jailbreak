@@ -22,6 +22,28 @@ export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 : "${MAX_SAMPLES:=1}"
 : "${LIMIT:=0}"
 : "${TORCH_DTYPE:=}"
+: "${TASK_ARGS:=}"
+: "${TASK_CONFIG:=}"
+
+TASK_ARGS_LIST=()
+if [[ -n "$TASK_ARGS" ]]; then
+  IFS=';' read -r -a _task_parts <<<"$TASK_ARGS"
+  for part in "${_task_parts[@]}"; do
+    trimmed="$(echo "$part" | xargs)"
+    [[ -z "$trimmed" ]] && continue
+    TASK_ARGS_LIST+=(-T "$trimmed")
+  done
+fi
+
+TASK_CONFIG_LIST=()
+if [[ -n "$TASK_CONFIG" ]]; then
+  IFS=';' read -r -a _task_config_parts <<<"$TASK_CONFIG"
+  for part in "${_task_config_parts[@]}"; do
+    trimmed="$(echo "$part" | xargs)"
+    [[ -z "$trimmed" ]] && continue
+    TASK_CONFIG_LIST+=(--task-config "$trimmed")
+  done
+fi
 
 # Respect pre-set INSPECT_LOG_DIR from caller (e.g., sweep scripts)
 if [[ -z "${INSPECT_LOG_DIR:-}" ]]; then
@@ -199,7 +221,7 @@ for model_alias in "${MODEL_LIST[@]}"; do
 
   for dataset in "${DATASET_LIST[@]}"; do
     printf '\n=== Running %s with %s (logs -> %s) ===\n' "$dataset" "$model_alias" "$model_log_dir"
-    inspect eval "$dataset" "${model_args[@]}" "${common_args[@]}" "${log_arg[@]}" --tags "model=$model_alias,dataset=$dataset"
+    inspect eval "$dataset" "${model_args[@]}" "${common_args[@]}" "${log_arg[@]}" "${TASK_ARGS_LIST[@]}" "${TASK_CONFIG_LIST[@]}" --tags "model=$model_alias,dataset=$dataset"
   done
 
   # Clear GPU caches between models to reduce fragmentation

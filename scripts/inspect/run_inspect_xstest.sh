@@ -15,8 +15,19 @@ if [[ -z "${MODEL_ALIASES:-}" ]]; then
   MODEL_ALIASES="olmo/olmo7b_dpo olmo/olmo7b_sft"
 fi
 
+if [[ -z "${SCORER_MODEL:-}" ]]; then
+  SCORER_MODEL="openai/gpt-5-mini"
+fi
+
 export MODEL_ALIASES
 export DATASETS="${DATASETS:-inspect_evals/xstest}"
+export SCORER_MODEL
+: "${TASK_ARGS:=}"
+if [[ -z "$TASK_ARGS" ]]; then
+  export TASK_ARGS="scorer_model=$SCORER_MODEL"
+else
+  export TASK_ARGS="$TASK_ARGS;scorer_model=$SCORER_MODEL"
+fi
 : "${MODEL_DEVICE:=cuda}"
 : "${TORCH_DTYPE:=bfloat16}"
 

@@ -31,7 +31,8 @@ BASE_DIR=""
 LOGS_DIR="$ROOT_DIR/logs/inspect_gsm8k_sweep"
 DATASETS="${DATASETS:-inspect_evals/gsm8k}"
 MODEL_ALIASES="${MODEL_ALIASES:-olmo/olmo7b_dpo}"
-INSPECT_SCRIPT="${INSPECT_SCRIPT:-$ROOT_DIR/scripts/inspect/run_inspect_gsm8k.sh}"
+INSPECT_SCRIPT_DEFAULT="$ROOT_DIR/scripts/inspect/run_inspect_gsm8k.sh"
+INSPECT_SCRIPT="${INSPECT_SCRIPT:-$INSPECT_SCRIPT_DEFAULT}"
 TEMP_LINK_DIR="$ROOT_DIR/tmp/inspect_sweep"
 MAX_JOBS=16
 EXPECTED_STEPS="100 200 300 400 500 600"
@@ -95,6 +96,10 @@ if [[ -z "$BASE_DIR" ]]; then
   echo "Error: --base-dir is required."
   usage
   exit 1
+fi
+
+if [[ "$INSPECT_SCRIPT" == "$INSPECT_SCRIPT_DEFAULT" && "$DATASETS" == *"inspect_evals/xstest"* ]]; then
+  INSPECT_SCRIPT="$ROOT_DIR/scripts/inspect/run_inspect_xstest.sh"
 fi
 
 if [[ ! -d "$BASE_DIR" ]]; then
