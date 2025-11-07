@@ -11,14 +11,17 @@ LIMIT="${LIMIT:-all}"
 SEED="${SEED:-123456789}"
 LAYER="${LAYER:-20}"
 STEER_ARTIFACT="${STEER_ARTIFACT:-artifacts/activation_directions/kl_ablated.pt}"
-DPO_MODEL="${DPO_MODEL:-allenai/OLMo-2-1124-7B-DPO}"
+# Default to SFT-only by setting the primary model to SFT.
+# You can override DPO_MODEL to the DPO checkpoint to run DPO-only,
+# or set COMPUTE_NEW=true to run the contrast mode.
+DPO_MODEL="${DPO_MODEL:-allenai/OLMo-2-1124-7B-SFT}"
 SFT_MODEL="${SFT_MODEL:-allenai/OLMo-2-1124-7B-SFT}"
 OUTPUT_DIR="${OUTPUT_DIR:-artifacts/attribution/run_$(date +%Y%m%d_%H%M%S)}"
 DEVICE="${DEVICE:-auto}"
 MAX_GPU_MEM_FRACTION="${MAX_GPU_MEM_FRACTION:-0.9}"
 MAX_TOTAL_TOKENS="${MAX_TOTAL_TOKENS:-6000}"
 COMPUTE_NEW="${COMPUTE_NEW:-false}"
-RESUME_FROM="${RESUME_FROM:-artifacts/attribution/run_20251010_214727}"
+#RESUME_FROM="${RESUME_FROM:-artifacts/attribution/run_20251010_214727}"
 
 ARGS=(
   --dataset "$DATASET"
@@ -41,7 +44,7 @@ else
   ARGS+=(--no-compute-new)
 fi
 
-if [ -n "$RESUME_FROM" ]; then
+if [ -n "${RESUME_FROM:-}" ]; then
   ARGS+=(--resume-from "$RESUME_FROM")
 fi
 

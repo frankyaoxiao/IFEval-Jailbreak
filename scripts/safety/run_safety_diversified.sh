@@ -2,7 +2,7 @@
 set -euo pipefail
 
 python evaluate_safety.py \
-  -n 10 \
+  -n 20 \
   --prompt-set diversified_pairs \
   --num-prompts all \
   --models olmo7b_dpo \

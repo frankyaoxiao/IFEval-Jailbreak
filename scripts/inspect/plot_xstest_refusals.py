@@ -10,7 +10,7 @@ import logging
 import re
 import zipfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -53,6 +53,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable verbose logging.",
     )
+    parser.add_argument(
+        "--include-switch-subsets",
+        action="store_true",
+        help="Also generate switch vs non-switch subset plots.",
+    )
+    parser.add_argument(
+        "--overall-show-ci",
+        action="store_true",
+        help="Display approximate 95% confidence intervals on overall plots.",
+    )
     return parser.parse_args()
 
 
@@ -90,7 +100,7 @@ def _find_eval_file(step_dir: Path) -> Optional[Path]:
     return eval_files[0]
 
 
-def _fallback_refusal_rate(archive: zipfile.ZipFile) -> Optional[float]:
+def _fallback_refusal_rate(archive: zipfile.ZipFile) -> Optional[Tuple[float, int, int]]:
     total = 0
     refusals = 0
     for name in archive.namelist():
@@ -107,10 +117,11 @@ def _fallback_refusal_rate(archive: zipfile.ZipFile) -> Optional[float]:
             refusals += 1
     if total == 0:
         return None
-    return refusals / total * 100.0
+    rate = refusals / total * 100.0
+    return rate, refusals, total
 
 
-def load_refusal_rate(eval_path: Path) -> Optional[float]:
+def load_refusal_rate(eval_path: Path) -> Optional[Tuple[float, int, int]]:
     try:
         with zipfile.ZipFile(eval_path) as archive:
             try:
@@ -124,10 +135,21 @@ def load_refusal_rate(eval_path: Path) -> Optional[float]:
                     metrics = entry.get("metrics", {})
                     rate = metrics.get("refusal_rate", {}).get("value")
                     if rate is not None:
-                        return float(rate)
+                        total = entry.get("scored_samples") or entry.get("params", {}).get("scored_samples")
+                        if total is not None:
+                            total = int(total)
+                            refusals = int(round(float(rate) / 100.0 * total))
+                        else:
+                            fallback = _fallback_refusal_rate(archive)
+                            if fallback is not None:
+                                LOGGER.debug("Computed fallback refusal rate %.2f for %s", fallback[0], eval_path)
+                                return fallback
+                            total = 0
+                            refusals = 0
+                        return float(rate), refusals, total
             fallback = _fallback_refusal_rate(archive)
             if fallback is not None:
-                LOGGER.debug("Computed fallback refusal rate %.2f for %s", fallback, eval_path)
+                LOGGER.debug("Computed fallback refusal rate %.2f for %s", fallback[0], eval_path)
             return fallback
     except (zipfile.BadZipFile, json.JSONDecodeError) as exc:
         LOGGER.warning("Failed to read %s: %s", eval_path, exc)
@@ -142,15 +164,18 @@ def build_dataframe(completed_runs: Dict[str, Dict[int, Path]]) -> pd.DataFrame:
             if eval_path is None:
                 LOGGER.warning("No .eval file found in %s", path)
                 continue
-            rate = load_refusal_rate(eval_path)
-            if rate is None:
+            result = load_refusal_rate(eval_path)
+            if result is None:
                 LOGGER.warning("Could not extract refusal rate from %s", eval_path)
                 continue
+            rate, refusal_count, total_count = result
             rows.append(
                 {
                     "base_run": base_run,
                     "step": step,
                     "refusal_rate": rate,
+                    "refusal_count": refusal_count,
+                    "total_count": total_count,
                 }
             )
     if not rows:
@@ -160,17 +185,51 @@ def build_dataframe(completed_runs: Dict[str, Dict[int, Path]]) -> pd.DataFrame:
     return df
 
 
-def plot_overall(df: pd.DataFrame, output_path: Path) -> plt.Figure:
+def _compute_ci_bounds(df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+    lower = pd.Series(index=df.index, dtype=float)
+    upper = pd.Series(index=df.index, dtype=float)
+    for idx, row in df.iterrows():
+        total = row.get("total_count", 0)
+        if not total:
+            lower.loc[idx] = float("nan")
+            upper.loc[idx] = float("nan")
+            continue
+        p = row["refusal_rate"] / 100.0
+        se = (p * (1.0 - p) / total) ** 0.5
+        delta = 1.96 * se * 100.0
+        lower.loc[idx] = max(0.0, row["refusal_rate"] - delta)
+        upper.loc[idx] = min(100.0, row["refusal_rate"] + delta)
+    return lower, upper
+
+
+def plot_overall(
+    df: pd.DataFrame,
+    output_path: Path,
+    *,
+    show_ci: bool = False,
+) -> plt.Figure:
     sns.set_theme(style="whitegrid")
     fig, ax = plt.subplots(figsize=(10, 6))
     for base_run in sorted(df["base_run"].unique()):
         group = df[df["base_run"] == base_run].sort_values("step")
-        ax.plot(group["step"], group["refusal_rate"], marker="o", label=base_run)
+        if show_ci:
+            lower, upper = _compute_ci_bounds(group)
+            yerr = [group["refusal_rate"] - lower, upper - group["refusal_rate"]]
+            ax.errorbar(
+                group["step"],
+                group["refusal_rate"],
+                yerr=yerr,
+                marker="o",
+                capsize=4,
+                label=base_run,
+            )
+        else:
+            ax.plot(group["step"], group["refusal_rate"], marker="o", label=base_run)
     ax.set_xlabel("Step")
     ax.set_ylabel("Refusal Rate (%)")
     ax.set_title("XSTest Refusal Rate by Training Step")
     ax.set_xticks(sorted(df["step"].unique()))
-    ax.legend(loc="upper right", title="Model")
+    ax.legend(loc="upper left", title="Model")
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
@@ -178,13 +237,29 @@ def plot_overall(df: pd.DataFrame, output_path: Path) -> plt.Figure:
     return fig
 
 
-def plot_per_model(df: pd.DataFrame, output_dir: Path) -> List[plt.Figure]:
+def plot_per_model(
+    df: pd.DataFrame,
+    output_dir: Path,
+    *,
+    show_ci: bool = False,
+) -> List[plt.Figure]:
     sns.set_theme(style="whitegrid")
     figs: List[plt.Figure] = []
     for base_run in sorted(df["base_run"].unique()):
         group = df[df["base_run"] == base_run].sort_values("step")
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(group["step"], group["refusal_rate"], marker="o")
+        if show_ci:
+            lower, upper = _compute_ci_bounds(group)
+            yerr = [group["refusal_rate"] - lower, upper - group["refusal_rate"]]
+            ax.errorbar(
+                group["step"],
+                group["refusal_rate"],
+                yerr=yerr,
+                marker="o",
+                capsize=4,
+            )
+        else:
+            ax.plot(group["step"], group["refusal_rate"], marker="o")
         ax.set_xlabel("Step")
         ax.set_ylabel("Refusal Rate (%)")
         ax.set_title(f"{base_run} – XSTest refusal rate")
@@ -194,6 +269,29 @@ def plot_per_model(df: pd.DataFrame, output_dir: Path) -> List[plt.Figure]:
         model_dir.mkdir(parents=True, exist_ok=True)
         fig.savefig(model_dir / "refusal_rate.png", dpi=200)
         LOGGER.info("Saved %s", model_dir / "refusal_rate.png")
+        figs.append(fig)
+    return figs
+
+
+def plot_switch_subsets(
+    df: pd.DataFrame,
+    output_dir: Path,
+    *,
+    show_ci: bool,
+) -> List[plt.Figure]:
+    subsets: List[Tuple[str, pd.DataFrame]] = []
+    switch_mask = df["base_run"].str.contains("switch", case=False, regex=False)
+    if switch_mask.any():
+        subsets.append(("switch", df[switch_mask]))
+    if (~switch_mask).any():
+        subsets.append(("non_switch", df[~switch_mask]))
+
+    figs: List[plt.Figure] = []
+    for label, subset_df in subsets:
+        if subset_df.empty:
+            continue
+        label_dir = output_dir / label
+        fig = plot_overall(subset_df, label_dir / "refusal_rates.png", show_ci=show_ci)
         figs.append(fig)
     return figs
 
@@ -220,14 +318,23 @@ def main() -> None:
         raise SystemExit(1)
 
     output_dir = args.output_dir
-    overall_fig = plot_overall(df, output_dir / "refusal_rates.png")
-    per_model_figs = plot_per_model(df, output_dir / "per_model")
+    overall_fig = plot_overall(df, output_dir / "refusal_rates.png", show_ci=args.overall_show_ci)
+    per_model_figs = plot_per_model(
+        df,
+        output_dir / "per_model",
+        show_ci=args.overall_show_ci,
+    )
+    subset_figs: List[plt.Figure] = []
+    if args.include_switch_subsets:
+        subset_figs = plot_switch_subsets(df, output_dir, show_ci=args.overall_show_ci)
 
     if args.show:
         plt.show()
     else:
         plt.close(overall_fig)
         for fig in per_model_figs:
+            plt.close(fig)
+        for fig in subset_figs:
             plt.close(fig)
 
     print(
