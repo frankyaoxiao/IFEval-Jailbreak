@@ -3,12 +3,12 @@ description: Original automatically generated prompts with base and word-limit v
 plot_style: base_vs_distractor
 variants:
   base:
-    label: Base
+    label: Harmful Request
     variant_type: base
     max_tokens: 100
     source: base
   base_plus_distractor:
-    label: Base + Distractor
+    label: Harmful Request + Distractor
     variant_type: base_plus_distractor
     max_tokens: 50
     source: distractor

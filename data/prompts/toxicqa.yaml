@@ -12,12 +12,12 @@ dataset:
 plot_style: paired_difference
 variants:
   base:
-    label: Base
+    label: Harmful Request
     variant_type: base
     max_tokens: 100
     source: prompt
   base_plus_distractor:
-    label: Base + Distractor
+    label: Harmful Request + Distractor
     variant_type: base_plus_distractor
     max_tokens: 50
     source: distractor

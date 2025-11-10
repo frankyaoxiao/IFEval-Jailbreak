@@ -4,7 +4,7 @@ plot_style: single_variant
 display_prompt_variant: base_plus_distractor
 variants:
   base_plus_distractor:
-    label: Base + Distractor
+    label: Harmful Request + Distractor
     variant_type: base_plus_distractor
     max_tokens: 60
     source: distractor
