@@ -98,6 +98,9 @@ def _build_model_map() -> Tuple[Dict[str, str], Dict[str, str]]:
         "olmo13b_instruct": "allenai/OLMo-2-1124-13B-Instruct",
         "olmo13b_sft": "allenai/OLMo-2-1124-13B-SFT",
         "olmo13b_dpo": "allenai/OLMo-2-1124-13B-DPO",
+        # 32B checkpoints
+        "olmo32b_sft": "allenai/OLMo-2-0325-32B-SFT",
+        "olmo32b_dpo": "allenai/OLMo-2-0325-32B-DPO",
         "olmo7b_instruct": "allenai/OLMo-2-1124-7B-Instruct",
         "olmo7b_dpo": "allenai/OLMo-2-1124-7B-DPO",
         "olmo7b_sft": "allenai/OLMo-2-1124-7B-SFT",
