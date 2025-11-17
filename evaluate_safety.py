@@ -120,7 +120,7 @@ Examples:
     parser.add_argument(
         '--num-prompts',
         type=str,
-        default='10',
+        default='all',
         help="Number of prompt scenarios to use (integer or 'all'). Each scenario tests all configured variants."
     )
     
