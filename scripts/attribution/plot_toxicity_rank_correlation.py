@@ -42,10 +42,16 @@ def parse_args() -> argparse.Namespace:
         default=20000,
         help="Sample size for scatter/hexbin (use <=0 to use all points).",
     )
+    parser.add_argument(
+        "--top-n",
+        type=int,
+        default=0,
+        help="Optional cap on the top-N entries (from each ranking) to include before correlation (0 means all).",
+    )
     return parser.parse_args()
 
 
-def load_rank_positions(path: Path) -> Dict[str, int]:
+def load_rank_positions(path: Path, limit: Optional[int] = None) -> Dict[str, int]:
     mapping: Dict[str, int] = {}
     with path.open("r", encoding="utf-8") as handle:
         for idx, line in enumerate(handle):
@@ -56,12 +62,15 @@ def load_rank_positions(path: Path) -> Dict[str, int]:
             uid = str(record.get("uid"))
             if uid:
                 mapping[uid] = idx
+            if limit and len(mapping) >= limit:
+                break
     return mapping
 
 
 def load_aligned_positions(
     ranking_positions: Dict[str, int],
     toxicity_path: Path,
+    limit: Optional[int] = None,
 ) -> Tuple[List[int], List[int]]:
     rank_positions: List[int] = []
     toxicity_positions: List[int] = []
@@ -78,6 +87,8 @@ def load_aligned_positions(
                 continue
             rank_positions.append(ranking_positions[uid])
             toxicity_positions.append(idx)
+            if limit and len(toxicity_positions) >= limit:
+                break
     return rank_positions, toxicity_positions
 
 
@@ -97,8 +108,9 @@ def main() -> None:
     args = parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    ranking_positions = load_rank_positions(args.ranking_file)
-    rank, tox = load_aligned_positions(ranking_positions, args.toxicity_file)
+    top_limit = args.top_n if args.top_n and args.top_n > 0 else None
+    ranking_positions = load_rank_positions(args.ranking_file, limit=top_limit)
+    rank, tox = load_aligned_positions(ranking_positions, args.toxicity_file, limit=top_limit)
 
     if not rank:
         raise SystemExit("No overlapping UIDs between ranking and toxicity files.")
