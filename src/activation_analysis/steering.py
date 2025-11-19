@@ -24,16 +24,24 @@ class SteeringConfig:
     layer_vectors: Dict[int, torch.Tensor]
     scale: float
     do_sample: bool = True
+    mode: str = "add"  # add, project_out
 
 
 @contextmanager
-def apply_layer_steering(model, layer_vectors: Dict[int, torch.Tensor], scale: float) -> Iterator[None]:
+def apply_layer_steering(
+    model,
+    layer_vectors: Dict[int, torch.Tensor],
+    scale: float,
+    mode: str = "add",
+) -> Iterator[None]:
     """Temporarily add scaled direction vectors to specific decoder layers.
 
     Args:
         model: Loaded causal LM (expected to expose ``model.layers``).
         layer_vectors: Mapping of layer index -> 1D direction tensor.
         scale: Scalar multiplier applied to each direction.
+        mode: Steering strategy ("add" to add/subtract the vector, "project_out" to
+              remove components along the vector; scale controls strength).
     """
 
     device = next(model.parameters()).device
@@ -41,6 +49,7 @@ def apply_layer_steering(model, layer_vectors: Dict[int, torch.Tensor], scale: f
 
     def make_hook(vec: torch.Tensor):
         direction = vec.to(device).view(1, 1, -1)
+        dir_norm = torch.sum(direction * direction).item()
         state = {"seen_prompt": False}
 
         def hook(module, inputs, output):
@@ -61,9 +70,16 @@ def apply_layer_steering(model, layer_vectors: Dict[int, torch.Tensor], scale: f
                 hidden = hidden.clone()
                 steer = direction.to(hidden.dtype)
                 if hidden.shape[1] > 1:
-                    hidden[:, -1:, :] += scale * steer
+                    target = hidden[:, -1:, :]
                 else:
-                    hidden += scale * steer
+                    target = hidden
+
+                if mode == "project_out":
+                    if dir_norm > 0:
+                        coeff = (target * steer).sum(dim=-1, keepdim=True) / dir_norm
+                        target -= scale * coeff * steer
+                else:  # default additive steering
+                    target += scale * steer
 
             if residual is None:
                 return hidden

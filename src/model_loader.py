@@ -312,7 +312,7 @@ class OLMoModelLoader:
 
             with torch.no_grad():
                 steering_ctx = (
-                    apply_layer_steering(model, steering.layer_vectors, steering.scale)
+                    apply_layer_steering(model, steering.layer_vectors, steering.scale, steering.mode)
                     if steering and apply_layer_steering is not None
                     else nullcontext()
                 )
@@ -351,7 +351,7 @@ class OLMoModelLoader:
 
         with torch.no_grad():
             steering_ctx = (
-                apply_layer_steering(model, steering.layer_vectors, steering.scale)
+                apply_layer_steering(model, steering.layer_vectors, steering.scale, steering.mode)
                 if steering and apply_layer_steering is not None
                 else nullcontext()
             )

@@ -258,6 +258,12 @@ Examples:
         default=True,
         help='Whether the steered model should sample during generation (default: enabled).'
     )
+    parser.add_argument(
+        '--steer-mode',
+        choices=['add', 'project_out'],
+        default='add',
+        help='How to apply the steering direction: add/subtract the vector or project it out entirely (default: add).'
+    )
 
     parser.add_argument(
         '--logit-diff-base-model',
@@ -363,11 +369,12 @@ Examples:
             layer_vectors=layer_vectors,
             scale=args.steer_scale,
             do_sample=args.steer_do_sample,
+            mode=args.steer_mode,
         )
 
         prefix = args.steer_label or f"{base_model.upper()} (steered)"
         layers_str = ','.join(str(l) for l in steer_layers)
-        steer_label = f"{prefix} [layers {layers_str}; scale {args.steer_scale}]"
+        steer_label = f"{prefix} [layers {layers_str}; mode {args.steer_mode}; scale {args.steer_scale}]"
 
         models_to_test = [base_model, steering_identifier]
     
